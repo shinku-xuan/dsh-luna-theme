@@ -1,0 +1,11 @@
+# 依赖与本地产物
+node_modules/
+*.tgz
+package-lock.json
+
+# 编辑器 / 操作系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
