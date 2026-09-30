@@ -4,7 +4,11 @@
 >
 > A Luna-Chat inspired theme plugin for the DeepSeek Harness desktop and web shells.
 
-**只改样式，不改功能。** 插件不注册工具、不读写会话、不改用户设置；停用后界面完全恢复原样。
+**换肤部分只改样式，不改功能。** 插件不注册工具、不读写会话、不改用户设置；停用后界面完全恢复原样。
+
+0.3.0 起包内附一个**可选**的余额挂件（右下角露娜立绘，气泡里是 DeepSeek 账户余额）。
+它会读取你的 `DEEPSEEK_API_KEY` 并向 `api.deepseek.com` 查询余额 —— 不想要就按
+[关闭余额挂件](#关闭余额挂件) 关掉，插件即回到纯换肤。
 
 ---
 
@@ -38,10 +42,12 @@ dsh plugin --profile desktop add github:shinku-xuan/dsh-luna-theme
 
 # 或从本地目录 / 打包产物
 dsh plugin --profile desktop add ./dsh-luna-theme
-dsh plugin --profile desktop add ./dsh-luna-theme-0.2.10.tgz
+dsh plugin --profile desktop add ./dsh-luna-theme-0.3.0.tgz
 ```
 
 装完**重启桌面端**（或 DSH Web 进程）生效。
+
+> 换肤部分改完不用重启就能看到（客户端 bundle 是热重载的），但**余额挂件那部分要重启才生效**。
 
 ## 卸载
 
@@ -50,6 +56,30 @@ dsh plugin --profile desktop remove dsh-luna-theme
 ```
 
 移除后 token 层与样式表都会自动撤回，界面回到 DSH 原样。
+
+## 余额挂件
+
+右下角一张露娜立绘，气泡里是 DeepSeek 账户余额：
+
+- **余额**取自 `https://api.deepseek.com/user/balance`，密钥是 profile 里配置的 `DEEPSEEK_API_KEY`
+  （未配置时气泡显示提示）；宿主侧有 25 秒缓存与请求去重，60 秒自动刷新，**点击立刻刷新**。
+- **拖拽**：拖到左右各四分之一区域自动吸附该边，吸附在左侧时整只（含文字）水平翻转。
+- **大小**：悬停后右上角出现 `-` / `+`，缩放会记到插件目录里。
+- 瞬时网络失败时继续显示上一次的余额，不会闪错误。
+
+### 关闭余额挂件
+
+在 profile 的 `cordis.patch.yml` 里加一条，然后重启 DSH：
+
+```yaml
+- id: luna-balance-widget
+  disabled: true
+```
+
+删掉这条即恢复。挂件与换肤是**两条独立的行**：关掉挂件不影响换肤；但反过来关掉整个插件
+（即换肤那一行）会连挂件一起关掉 —— 页面脚本是由换肤的客户端 bundle 加载的。
+
+> 挂件大小记在插件自己的目录里，**重装插件会重置为默认大小**。
 
 ## 兼容性
 
@@ -72,19 +102,22 @@ dsh plugin --profile desktop remove dsh-luna-theme
 
 ## 许可
 
-- **代码**：MIT，见 [`LICENSE`](LICENSE)。
+- **本项目的代码**：MIT，见 [`LICENSE`](LICENSE)。
+- **余额挂件的代码**（`widget.js`）派生自 [DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)
+  （MIT，© 2026 MeteorNOX），随包保留原作者版权声明，本项目对其的改动清单见
+  [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) 第 3 节。
 - **随附的图像素材**：**不适用 MIT**，权利归原权利人所有 —— 见下方声明与
   [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
 
 ## 第三方素材与免责声明
 
-本插件随附的壁纸素材 `assets/wallpaper.webp` 取自 / 派生自游戏
-**《近月少女的礼仪》（月に寄りそう乙女の作法）** 的视觉素材。
+本插件随附的两张图像素材 —— 壁纸 `assets/wallpaper.webp` 与余额挂件底图 `assets/luna-noon.webp`
+—— 均取自 / 派生自游戏 **《近月少女的礼仪》（月に寄りそう乙女の作法）** 的视觉素材。
 
 - **该素材的全部权利归 Navel 所有。**
 - 本项目**不主张**对上述素材的任何权利，与 Navel **无任何隶属、合作或背书关系**。
 - 素材仅作为**个人、非商业**用途的界面装饰使用；请勿用于商业用途，也请勿据其主张任何权利。
-- 若权利人认为使用不妥，**提出后会立即移除**（删除 `assets/wallpaper.webp` 并调整引用，
-  不影响插件其余功能）。
+- 若权利人认为使用不妥，**提出后会立即移除**（删除对应文件并调整引用，不影响插件其余功能：
+  删 `assets/wallpaper.webp` 回退为无壁纸，删 `assets/luna-noon.webp` 后挂件底图回退或显示占位）。
 
 完整说明见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。

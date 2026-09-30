@@ -1,3 +1,17 @@
+# Two rows, so the balance widget can be switched off on its own.
+#
+# Turning the widget off needs no rebuild: add a patch entry to the profile's
+# own `cordis.patch.yml` that names the row and disables it.
+#
+#   - id: luna-balance-widget
+#     disabled: true
+#
+# The widget row names the package SUBPATH, not the package. Two rows naming the
+# package root would register two active client sources for one package, which
+# the client module system rejects as a composition error; the subpath row is
+# not a client row, so only `dsh-luna-theme` carries this package's client half.
 - insert:
     - id: dsh-luna-theme
       name: dsh-luna-theme
+    - id: luna-balance-widget
+      name: dsh-luna-theme/widget

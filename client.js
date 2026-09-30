@@ -2,12 +2,17 @@
  * Luna restyle for the DSH client: a palette-and-material layer borrowed from
  * Luna-Chat's front end.
  *
- * Presentation only. Two channels, both retracted when the plugin is disabled:
+ * The restyle is presentation only. Three channels, each retracted when the
+ * plugin is disabled:
  *   1. `ctx.theme.overrideTokens` stacks a `--dsw-*` token layer over whatever
  *      theme is active, so the palette follows the user's light/dark scheme
  *      without registering a theme or writing their preference.
  *   2. One stylesheet carries the effects a token cannot express — the
  *      wallpaper layer, markdown decoration, and the native selection colour.
+ *   3. A `<script>` tag for the balance widget's page script, served by the
+ *      Host row `luna-balance-widget` (`widget.js`). This one is a feature
+ *      rather than a repaint, and it is the only reason this bundle needs the
+ *      document at all beyond its own sheets.
  *
  * Geometry (padding, margin, sizes) is deliberately untouched: this plugin
  * repaints the shipped layout, it does not re-lay-out it. The one exception is
@@ -28,6 +33,16 @@ window.__ModuleLoader__.load({
 
     /** Diagnostic beacon the Host half records, so a silent failure is not silent. */
     const PING_ROUTE = '/dsh-luna/ping'
+
+    /**
+     * Page script served by this bundle's widget row.
+     *
+     * The desktop shell serves its own static index and never applies the Host's
+     * `tapIndex` transforms, so the tag has to come from a client bundle for both
+     * shells to run it. It is added unconditionally: with the widget row disabled
+     * the route 404s and the tag loads nothing.
+     */
+    const WIDGET_SCRIPT_URL = '/dsh-whale/widget.js'
 
     // Undo this bundle's own style sweep before doing anything else.
     //
@@ -466,6 +481,19 @@ body ::selection {
           tag.textContent = LUNA_CSS
           document.head.append(tag)
           return () => tag.remove()
+        })
+
+        // Load the widget's page script. Idempotent, because the Host's own
+        // index hook may have inserted the same tag first in shells that do
+        // apply `tapIndex`.
+        ctx.effect(() => {
+          if (document.querySelector('script[data-dsh-whale-widget]')) return () => {}
+          const script = document.createElement('script')
+          script.src = WIDGET_SCRIPT_URL
+          script.defer = true
+          script.dataset.dshWhaleWidget = 'true'
+          document.head.append(script)
+          return () => script.remove()
         })
 
         // Bounded wait for the theme service: another client plugin registers
