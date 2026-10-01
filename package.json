@@ -1,8 +1,8 @@
 {
   "name": "dsh-luna-theme",
-  "version": "0.3.0",
+  "version": "0.4.2",
   "private": true,
-  "description": "Luna-Chat inspired palette, wallpaper and material restyle for the DSH desktop and web shells, plus an optional Luna balance widget.",
+  "description": "Luna-Chat inspired palette, wallpaper and material restyle for the DSH desktop and web shells, plus an optional Luna balance widget and memory badge.",
   "license": "MIT",
   "type": "module",
   "main": "index.js",
@@ -21,6 +21,7 @@
     "LICENSE",
     "THIRD-PARTY-NOTICES.md",
     "assets/wallpaper.webp",
+    "assets/luna-settings.webp",
     "assets/luna-noon.webp"
   ],
   "dsh": {
