@@ -45,6 +45,17 @@ window.__ModuleLoader__.load({
     const WIDGET_SCRIPT_URL = '/dsh-whale/widget.js'
 
     /**
+     * Page script served by this bundle's pet row (`luna-pet`).
+     *
+     * The same constraint as the widget script above: the desktop shell serves
+     * its own static index and never applies the Host's `tapIndex`, so the tag
+     * has to come from a client bundle for both shells to run it. It is added
+     * unconditionally, and with the pet row disabled the route 404s and the tag
+     * loads nothing.
+     */
+    const PET_SCRIPT_URL = '/dsh-luna-pet/pet.js'
+
+    /**
      * Route serving the cheap system-memory reading the badge polls.
      *
      * The badge is injected rather than registered into a slot, so it also has
@@ -1046,6 +1057,20 @@ div[role='dialog'][class$='_panel']:has(> [class$='_bar']) :is([class$='_percent
           script.src = WIDGET_SCRIPT_URL
           script.defer = true
           script.dataset.dshWhaleWidget = 'true'
+          document.head.append(script)
+          return () => script.remove()
+        })
+
+        // Load the pet's page script, on the same terms as the widget above:
+        // delivered by a client bundle because the desktop shell never applies
+        // the Host's index hook, and idempotent so a shell that does apply it
+        // cannot double-mount the pet.
+        ctx.effect(() => {
+          if (document.querySelector('script[data-dsh-luna-pet]')) return () => {}
+          const script = document.createElement('script')
+          script.src = PET_SCRIPT_URL
+          script.defer = true
+          script.dataset.dshLunaPet = 'true'
           document.head.append(script)
           return () => script.remove()
         })

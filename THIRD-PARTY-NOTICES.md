@@ -8,7 +8,7 @@
 
 ## 1. 《近月少女的礼仪》游戏素材
 
-本插件随附三张图像素材，均取自 / 派生自游戏
+本插件随附下列图像素材，均取自 / 派生自游戏
 **《近月少女的礼仪》（月に寄りそう乙女の作法）** 的视觉素材：
 
 | 文件 | 用途 | 处理 |
@@ -16,6 +16,8 @@
 | `assets/wallpaper.webp` | 界面壁纸 | 经模糊与重新编码 |
 | `assets/luna-settings.webp` | 设置面板背景 | 中心方裁切后经模糊与重新编码 |
 | `assets/luna-noon.webp` | 余额挂件底图 | 原样，复制自 Luna-Chat 前端随附的 `api_balance_noon.webp` |
+| `assets/asahi.webp` | 桌宠的单图立绘（无姿态图时的回退） | 原样，Q 版立绘 |
+| `assets/pet-art/*.webp`（11 张） | 桌宠的各姿态立绘 | 按 alpha 包围盒统一角色高、水平居中、脚底对齐后重新编码 |
 
 - **该游戏素材的全部权利（包括著作权及相关权利）归 Navel 所有。**
 - 本项目**不主张**对上述素材的任何权利，也**与 Navel 无任何隶属、合作或背书关系**。
@@ -25,7 +27,8 @@
 - 若权利人 Navel 认为本使用方式不妥，**请提出，本项目会立即移除相关素材**
   （删除对应文件即可，不影响插件其余功能：删 `assets/wallpaper.webp` 回退为无壁纸，
   删 `assets/luna-settings.webp` 后设置面板回退为原主题底色，
-  删 `assets/luna-noon.webp` 后挂件回退为鲸鱼底图或显示占位）。
+  删 `assets/luna-noon.webp` 后挂件回退为鲸鱼底图或显示占位，
+  删 `assets/asahi.webp` 与 `assets/pet-art/` 后桌宠不显示 —— 它不会在界面上留破图）。
 
 ## 2. 视觉语言参考
 
