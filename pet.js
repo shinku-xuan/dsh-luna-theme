@@ -2,9 +2,14 @@
  * Host half of the Luna desktop pet: the `luna-pet` row of the
  * `dsh-luna-theme` bundle.
  *
- * Serves the three `/dsh-luna-pet/*` routes the pet page script talks to
- * (page script, artwork, work status) and reduces the Host's `session/event`
- * feed to the one work-status snapshot the pet mirrors.
+ * Serves the `/dsh-luna-pet/*` routes the pet page script talks to — page
+ * script, artwork, work status, and the two chat routes — and reduces the
+ * Host's `session/event` feed to the one work-status snapshot the pet mirrors.
+ *
+ * The chat routes live here rather than in the page script because the page
+ * runs in the renderer and cannot reach `ctx.llm`. They read the persona from
+ * `persona/asahi-chat.md` and answer under the shell's own request fence; see
+ * `admitted()` for why that fence is not optional.
  *
  * It is deliberately a row of its own rather than a branch of `widget.js`: its
  * own `disabled` patch entry turns the pet off without touching either the
@@ -118,6 +123,62 @@ const JSON_HEADERS = {
   'Cache-Control': 'no-store',
 }
 
+// ---------------------------------------------------------------------------
+// Chat routes.
+// ---------------------------------------------------------------------------
+
+/**
+ * Thinking is OFF for every chat request, by measurement rather than taste.
+ *
+ * `deepseek-flash` defaults to `high` effort, and the same one-line greeting
+ * cost 131 tokens with it against 46 without. Worse, at `maxTokens: 96` the
+ * reasoning pass consumed the entire budget and not one `text-delta` arrived,
+ * so the bubble rendered empty and only the `finish` reason said why. A pet
+ * reply is one or two sentences; there is nothing for a reasoning pass to buy.
+ */
+const CHAT_REASONING_EFFORT = 'off'
+
+/** Output cap; generously above a three-sentence reply and still bounded. */
+const CHAT_MAX_TOKENS = 512
+
+/** Turns of history the page may send; older turns are dropped silently. */
+const CHAT_HISTORY_LIMIT = 12
+
+/** Largest request body accepted, in bytes. */
+const CHAT_BODY_LIMIT = 64 * 1024
+
+/**
+ * Persona file lookup, install tree before package, exactly like the artwork.
+ *
+ * The packaged copy is the default; the profile-level copy lets the wording be
+ * re-tuned without editing an installed package, which a reinstall would
+ * overwrite.
+ */
+const PERSONA_CANDIDATES = [
+  path.join(process.env.DSH_PROFILE_DIR ?? PLUGIN_DIR, 'asahi-chat.md'),
+  path.join(PLUGIN_DIR, 'persona', 'asahi-chat.md'),
+]
+
+/**
+ * SSE headers.
+ *
+ * No `Access-Control-Allow-Origin`: this route spends the user's credit, so it
+ * is same-origin only. The web server's gzip middleware skips
+ * `text/event-stream` by itself, so compression needs no opt-out here.
+ */
+const SSE_HEADERS = {
+  'Content-Type': 'text/event-stream; charset=utf-8',
+  'Cache-Control': 'no-store',
+  'Connection': 'keep-alive',
+  'X-Accel-Buffering': 'no',
+}
+
+/** JSON headers for the chat routes: same-origin only, unlike the read-only status route. */
+const CHAT_JSON_HEADERS = {
+  'Content-Type': 'application/json; charset=utf-8',
+  'Cache-Control': 'no-store',
+}
+
 const PET_JS = `(function () {
 if (window.__dshLunaPet) return
 window.__dshLunaPet = true
@@ -125,6 +186,18 @@ window.__dshLunaPet = true
 var SCRIPT_URL = '/dsh-luna-pet/pet.js'
 var IMAGE_URL = '/dsh-luna-pet/pet-image.png'
 var STATE_URL = '/dsh-luna-pet/state.json'
+var CHAT_URL = '/dsh-luna-pet/chat'
+var CHAT_MODELS_URL = '/dsh-luna-pet/chat-models.json'
+// Kept in step with the floating input's own width so the edge nudge is right on
+// the first frame, before the element has been laid out once.
+var CHAT_WIDTH = 232
+var CHAT_PAD = 8
+// A reply is held open for as long as it takes to read rather than for the
+// status bubble's fixed blip: the same 3.2 s that suits "办好了" leaves a
+// two-sentence answer unread.
+var CHAT_REPLY_MIN_MS = 5200
+var CHAT_REPLY_MS_PER_CHAR = 95
+var CHAT_REPLY_MAX_MS = 18000
 var STORE_KEY = 'dsh-luna-pet'
 var POLL_MS = 1500
 var FETCH_TIMEOUT_MS = 8000
@@ -227,16 +300,60 @@ var css = [
   // leave gold type on a washed-out violet over this light artwork. The theme
   // declares the tokens on body and this root is a child of it, so both schemes
   // follow with no dark-mode branch here.
-  '.dshlp-bubble{position:absolute;left:50%;bottom:calc(100% - 6px);transform:translate(-50%,4px) scale(.86);transform-origin:50% 100%;background:var(--luna-sub-plate-strong);color:var(--luna-sub-ink);border:1.5px solid var(--luna-sub-edge);border-radius:12px;padding:5px 10px;font-size:12px;line-height:1.35;white-space:nowrap;box-shadow:0 4px 14px rgba(40,32,64,.18);opacity:0;pointer-events:none;transition:opacity .18s ease,transform .18s cubic-bezier(.34,1.56,.64,1)}',
-  '.dshlp-bubble.dshlp-on{opacity:1;transform:translate(-50%,0) scale(1)}',
+  '.dshlp-bubble{position:absolute;left:50%;bottom:calc(100% - 6px);transform:translate(calc(-50% + var(--dshlp-shift,0px)),4px) scale(.86);transform-origin:50% 100%;background:var(--luna-sub-plate-strong);color:var(--luna-sub-ink);border:1.5px solid var(--luna-sub-edge);border-radius:12px;padding:5px 10px;font-size:12px;line-height:1.35;white-space:nowrap;box-shadow:0 4px 14px rgba(40,32,64,.18);opacity:0;pointer-events:none;transition:opacity .18s ease,transform .18s cubic-bezier(.34,1.56,.64,1)}',
+  '.dshlp-bubble.dshlp-on{opacity:1;transform:translate(calc(-50% + var(--dshlp-shift,0px)),0) scale(1)}',
   '.dshlp-bubble.dshlp-alert{border-color:var(--luna-sakura);font-weight:600}',
+  // A chat reply is a sentence or three, so it wraps where a status bubble never
+  // has to. The explicit max-content width is load-bearing rather than
+  // decorative: an absolutely positioned box shrink-to-fits against what is left
+  // of its containing block, and the pet box is only ~225px wide with the bubble
+  // centred, so the measure came out near six characters. An explicit width
+  // steps around that, and the cap then is the measure asked for: 144px of
+  // content is twelve full-width characters at 12px, since box-sizing is
+  // content-box here.
+  '.dshlp-bubble.dshlp-wide{white-space:normal;text-align:left;width:max-content;max-width:144px;line-height:1.5}',
   '.dshlp-menu{position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);background:var(--luna-sub-plate-strong);border:1.5px solid var(--luna-sub-edge);border-radius:10px;padding:4px;box-shadow:0 8px 22px rgba(40,32,64,.22);display:none;flex-direction:column;gap:2px;z-index:2;pointer-events:auto}',
   '.dshlp-menu.dshlp-on{display:flex}',
   '.dshlp-menu button{border:none;background:transparent;color:var(--luna-sub-ink);font:inherit;font-size:12px;text-align:left;padding:5px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}',
   '.dshlp-menu button:hover{background:var(--luna-sub-plate-hover)}',
   '.dshlp-zzz{position:absolute;left:60%;bottom:78%;color:#8d829f;font-size:13px;font-weight:700;opacity:0;pointer-events:none}',
   '.dshlp-zzz.dshlp-on{animation:dshlp-zzz 2.6s ease-in-out infinite}',
-  '@keyframes dshlp-zzz{0%{opacity:0;transform:translate(0,0) scale(.8)}30%{opacity:.9}100%{opacity:0;transform:translate(9px,-22px) scale(1.15)}}'
+  '@keyframes dshlp-zzz{0%{opacity:0;transform:translate(0,0) scale(.8)}30%{opacity:.9}100%{opacity:0;transform:translate(9px,-22px) scale(1.15)}}',
+  // The floating chat box sits over the character's hands rather than in a panel
+  // of its own: the conversation belongs to the pet, not to a window beside it.
+  // It wears the translucent tier and a backdrop blur, because the whole point
+  // of floating it there is that the artwork stays visible through it — the blur
+  // is what keeps the type legible over a busy background.
+  //
+  // The bottom anchor is measured, not guessed: in idle.webp the clasped hands
+  // sit at image y 570 of 720, and the box maps the artwork to its full height,
+  // so the hands are 20.8% up from the box's bottom edge. The input is about 18%
+  // of the box height at scale 1, so anchoring its bottom edge at 12% centres it
+  // on the hands and keeps them covered at every pet scale.
+  //
+  // The second background declaration is the progressive enhancement: the pet
+  // stands straight on the wallpaper, where the theme's own contrast model
+  // (panels under panels) does not describe it, and the plaque tier alone
+  // measures about 4.25:1 there — marginally under AA. Mixing the denser plate
+  // down to 78% stays visibly translucent while moving the composite back
+  // towards the plate colour. A browser without color-mix drops the line and
+  // keeps the token.
+  '.dshlp-say{position:absolute;left:50%;bottom:12%;transform:translateX(calc(-50% + var(--dshlp-shift,0px)));width:232px;max-width:calc(100vw - 16px);box-sizing:border-box;display:none;font:inherit;font-size:12px;line-height:1.4;color:var(--luna-sub-ink);background:var(--luna-sub-plate);background:color-mix(in srgb, var(--luna-sub-plate-strong) 78%, transparent);border:1.5px solid var(--luna-sub-edge);border-radius:11px;padding:7px 11px;outline:none;backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);box-shadow:0 6px 18px rgba(40,32,64,.24);z-index:4;pointer-events:auto}',
+  '.dshlp-say.dshlp-on{display:block}',
+  '.dshlp-say:focus{border-color:var(--luna-sakura)}',
+  '.dshlp-say::placeholder{color:var(--luna-sub-ink);opacity:.55}',
+  '.dshlp-say.dshlp-busy{opacity:.6}',
+  // The model list pulls out sideways from its menu row. It is a sibling of the
+  // rows rather than a child of one: a button cannot contain buttons.
+  '.dshlp-sub{position:absolute;left:calc(100% + 4px);display:none;flex-direction:column;gap:2px;min-width:104px;max-height:210px;overflow-y:auto;background:var(--luna-sub-plate-strong);border:1.5px solid var(--luna-sub-edge);border-radius:10px;padding:4px;box-shadow:0 8px 22px rgba(40,32,64,.22);z-index:3;pointer-events:auto}',
+  '.dshlp-sub.dshlp-on{display:flex}',
+  // Flipped when the pet stands near the right edge and the pullout would leave
+  // the viewport.
+  '.dshlp-sub.dshlp-flip{left:auto;right:calc(100% + 4px)}',
+  '.dshlp-sub button{border:none;background:transparent;color:var(--luna-sub-ink);font:inherit;font-size:12px;text-align:left;padding:5px 10px;border-radius:7px;cursor:pointer;white-space:nowrap}',
+  '.dshlp-sub button:hover{background:var(--luna-sub-plate-hover)}',
+  '.dshlp-sub button.dshlp-picked{font-weight:600}',
+  '.dshlp-sub button.dshlp-picked::before{content:"· ";opacity:.7}'
 ].join('\\n')
 
 var styleEl = document.createElement('style')
@@ -277,6 +394,18 @@ root.appendChild(zzz)
 var menu = document.createElement('div')
 menu.className = 'dshlp-menu'
 root.appendChild(menu)
+
+var sayInput = document.createElement('input')
+sayInput.className = 'dshlp-say'
+sayInput.type = 'text'
+sayInput.maxLength = 500
+sayInput.placeholder = '说点什么…'
+root.appendChild(sayInput)
+
+// Built here, appended by buildMenu() so it sits beside the row that opens it.
+var modelMenu = document.createElement('div')
+modelMenu.className = 'dshlp-sub'
+
 document.body.appendChild(root)
 
 var state = {
@@ -352,12 +481,13 @@ function save() {
       fx: viewport().w ? state.x / viewport().w : null,
       edge: state.x < viewport().w / 2 ? 'left' : 'right',
       sleeping: state.sleeping,
-      anchored: state.anchored
+      anchored: state.anchored,
+      chatModel: chatModelKey
     }))
   } catch (err) {}
 }
 
-function say(text, alert) {
+function say(text, alert, ms) {
   if (!text) return
   bubble.textContent = text
   bubble.classList.toggle('dshlp-alert', !!alert)
@@ -366,7 +496,8 @@ function say(text, alert) {
   bubbleTimer = setTimeout(function () {
     bubbleTimer = null
     bubble.classList.remove('dshlp-on')
-  }, BUBBLE_MS)
+    bubble.classList.remove('dshlp-wide')
+  }, ms || BUBBLE_MS)
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +527,10 @@ function neighbourRect() {
 // Roaming along the bottom band.
 // ---------------------------------------------------------------------------
 function planWalk() {
+  // The input and the reply bubble hang off the pet, so walking would drag them
+  // around the screen. Standing still for the length of a conversation is also
+  // what the character would do.
+  if (sayOpen || chatBusy) return
   var lo = minX()
   var hi = maxX()
   state.mode = 'idle'
@@ -519,6 +654,9 @@ function frame(now) {
 function render(now) {
   root.style.left = Math.round(state.x) + 'px'
   root.style.top = Math.round(state.y) + 'px'
+  // The input and the bubble hang off the pet, so they are re-placed wherever
+  // the pet moves — a drag, a walk home, or a window resize all land here.
+  if (sayOpen || bubbleTimer) placeFloaters()
   // A custom property write forces a style recalculation, so it is only
   // touched when the scale actually changes (menu, or a restored preference).
   if (state.scale !== lastScale) {
@@ -577,6 +715,9 @@ function artSrc(id) { return IMAGE_URL + '?id=' + encodeURIComponent(id) }
 function moodArt() {
   if (state.dragging) return 'drag'
   if (state.pose && performance.now() < state.pose.until) return state.pose.id
+  // Waiting on the model is the pet's own thinking, and it outranks the Host's
+  // state: the character asked the question here, not in the conversation.
+  if (chatBusy) return 'thinking'
   if (state.sleeping) return 'sleep'
   if (state.mode === 'walk') return 'walk-a'
   if (state.working === 'thinking') return 'thinking'
@@ -869,23 +1010,29 @@ function onActivity() {
 // Menu.
 // ---------------------------------------------------------------------------
 function buildMenu() {
-  function item(label, fn) {
+  function item(label, fn, keepOpen) {
     var b = document.createElement('button')
     b.type = 'button'
     b.textContent = label
     b.addEventListener('click', function (e) {
       e.stopPropagation()
-      fn()
-      closeMenu()
+      fn(b)
+      if (!keepOpen) closeMenu()
     })
     return b
   }
+  menu.appendChild(item('对话', toggleSay))
+  // The model row keeps the menu open: its whole purpose is to unfold the list
+  // beside itself, and closing first would take the list with it.
+  menu.appendChild(item('切换模型', function (row) { toggleModels(row) }, true))
+  menu.appendChild(item('清空上下文', clearChat))
   menu.appendChild(item('大一点', function () { setScale(state.scale + STEP) }))
   menu.appendChild(item('小一点', function () { setScale(state.scale - STEP) }))
   menu.appendChild(item('回到角落', goHome))
   anchorButton = item(anchorLabel(), function () { setAnchored(!state.anchored) })
   menu.appendChild(anchorButton)
   menu.appendChild(item('睡一会儿', function () { sleep(true) }))
+  menu.appendChild(modelMenu)
 }
 
 /** The one menu row that names the state it would switch to. */
@@ -945,6 +1092,319 @@ function setScale(v) {
 function openMenu() { menuOpen = true; menu.classList.add('dshlp-on') }
 function closeMenu() { menuOpen = false; menu.classList.remove('dshlp-on') }
 
+// ---------------------------------------------------------------------------
+// Chat.
+//
+// Two pieces of furniture, both anchored over the pet: a translucent input that
+// floats at the character's upper body, and the menu's sideways model pullout.
+// The reply itself uses the pet's ordinary speech bubble, so a conversation and
+// a status report look the same.
+//
+// It talks to the host half only: the renderer cannot reach the model service,
+// and the two routes it calls are behind the shell's own request fence.
+// ---------------------------------------------------------------------------
+var sayOpen = false
+var chatBusy = false
+var chatAbort = null
+var chatModels = []
+var chatModelKey = ''
+var chatTurns = []
+
+/**
+ * Nudge the floating input and the bubble back inside the viewport.
+ *
+ * Both are centred on the pet and the pet walks the whole band, so either can
+ * hang off an edge when the character stands at one. Measured per frame rather
+ * than on open alone, because a drag or a walk moves the anchor underneath it.
+ */
+function placeFloaters() {
+  var vw = viewport().w
+  var center = state.x + boxW() / 2
+  function shiftFor(width) {
+    var half = (width || 0) / 2
+    if (center - half < CHAT_PAD) return CHAT_PAD - (center - half)
+    if (center + half > vw - CHAT_PAD) return (vw - CHAT_PAD) - (center + half)
+    return 0
+  }
+  if (sayOpen) {
+    sayInput.style.setProperty('--dshlp-shift', Math.round(shiftFor(sayInput.offsetWidth || CHAT_WIDTH)) + 'px')
+  }
+  if (bubbleTimer) {
+    bubble.style.setProperty('--dshlp-shift', Math.round(shiftFor(bubble.offsetWidth)) + 'px')
+  }
+}
+
+/**
+ * Parse one batch of complete SSE blocks.
+ * @param text - whole event/data blocks, terminated by a blank line.
+ * @param onEvent - called with the event name and its parsed payload.
+ */
+function chatParse(text, onEvent) {
+  var blocks = text.split('\\n\\n')
+  for (var i = 0; i < blocks.length; i++) {
+    var lines = blocks[i].split('\\n')
+    var name = ''
+    var data = ''
+    for (var j = 0; j < lines.length; j++) {
+      var line = lines[j]
+      if (!line || line.charAt(0) === ':') continue
+      if (line.indexOf('event:') === 0) name = line.slice(6).trim()
+      else if (line.indexOf('data:') === 0) data += line.slice(5).trim()
+    }
+    if (!name || !data) continue
+    try { onEvent(name, JSON.parse(data)) } catch (err) {}
+  }
+}
+
+/** Rebuild the model pullout from the host, keeping the remembered choice when it still exists. */
+function chatLoadModels() {
+  return fetch(CHAT_MODELS_URL, { credentials: 'same-origin' }).then(function (res) {
+    if (!res.ok) throw new Error('HTTP ' + res.status)
+    return res.json()
+  }).then(function (data) {
+    var offered = (data && data.models) || []
+    chatModels = offered
+    modelMenu.textContent = ''
+    var keep = false
+    for (var i = 0; i < offered.length; i++) {
+      var item = offered[i]
+      var key = item.provider + '|' + item.id
+      if (key === chatModelKey) keep = true
+      modelMenu.appendChild(modelButton(item, key))
+    }
+    if (!offered.length) {
+      var empty = document.createElement('button')
+      empty.type = 'button'
+      empty.disabled = true
+      empty.textContent = '没有可用模型'
+      modelMenu.appendChild(empty)
+      return 0
+    }
+    // A remembered model this deployment no longer offers falls back to the
+    // first one rather than leaving the pullout on a dead value.
+    chatModelKey = (keep && chatModelKey) || (offered[0].provider + '|' + offered[0].id)
+    markPicked()
+    return offered.length
+  }).catch(function (err) {
+    modelMenu.textContent = ''
+    var failed = document.createElement('button')
+    failed.type = 'button'
+    failed.disabled = true
+    failed.textContent = '拿不到模型'
+    modelMenu.appendChild(failed)
+    say('拿不到模型列表……非常抱歉', true)
+    return 0
+  })
+}
+
+/** One row of the model pullout. */
+function modelButton(item, key) {
+  var button = document.createElement('button')
+  button.type = 'button'
+  button.dataset.model = key
+  button.textContent = item.name || item.id
+  button.addEventListener('click', function (e) {
+    e.stopPropagation()
+    chatModelKey = key
+    markPicked()
+    save()
+    closeMenu()
+    say('好的，换成' + (item.name || item.id), false, 2200)
+  })
+  return button
+}
+
+/** Mark the row the next request will use. */
+function markPicked() {
+  var rows = modelMenu.children
+  for (var i = 0; i < rows.length; i++) {
+    var picked = rows[i].dataset && rows[i].dataset.model === chatModelKey
+    if (picked) rows[i].classList.add('dshlp-picked')
+    else rows[i].classList.remove('dshlp-picked')
+  }
+}
+
+function chatTarget() {
+  var parts = String(chatModelKey || '').split('|')
+  return { provider: parts[0] || '', model: parts[1] || '' }
+}
+
+/** Drop the conversation. Nothing about it is durable, so this is the whole of it. */
+function clearChat() {
+  chatTurns = []
+  if (chatAbort) {
+    try { chatAbort.abort() } catch (err) {}
+    chatAbort = null
+  }
+  say('好的，我这就忘掉', false, 2600)
+}
+
+function sendChat() {
+  if (chatBusy) return
+  var text = sayInput.value.trim()
+  if (!text) return
+  var target = chatTarget()
+  if (!target.provider || !target.model) {
+    say('还没有可用的模型', true)
+    return
+  }
+  sayInput.value = ''
+  chatTurns.push({ role: 'user', text: text })
+  // The host trims this to its own history limit, so the page sends everything
+  // it has and lets the one place that owns the bound enforce it.
+  var payload = []
+  for (var i = 0; i < chatTurns.length; i++) payload.push(chatTurns[i])
+
+  chatBusy = true
+  sayInput.classList.add('dshlp-busy')
+  // The reply lands in the ordinary bubble, held open long enough to read: a
+  // fixed 3.2 s is a status blip, not a sentence someone has to take in.
+  say('……', false, CHAT_REPLY_MAX_MS)
+  bubble.classList.add('dshlp-wide')
+
+  var answer = ''
+  var failed = false
+
+  function onEvent(name, data) {
+    if (name === 'delta' && data && typeof data.text === 'string') {
+      answer += data.text
+      say(answer, false, CHAT_REPLY_MAX_MS)
+      return
+    }
+    if (name === 'failed') {
+      failed = true
+      say(String((data && data.message) || '模型调用失败'), true, CHAT_REPLY_MAX_MS)
+    }
+  }
+
+  function settle() {
+    chatBusy = false
+    chatAbort = null
+    sayInput.classList.remove('dshlp-busy')
+    if (answer) {
+      chatTurns.push({ role: 'assistant', text: answer })
+      holdReply(answer)
+    } else if (!failed) {
+      bubble.classList.remove('dshlp-on')
+    }
+  }
+
+  chatAbort = ('AbortController' in window) ? new AbortController() : null
+  fetch(CHAT_URL, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: target.provider, model: target.model, messages: payload }),
+    signal: chatAbort ? chatAbort.signal : undefined
+  }).then(function (res) {
+    if (!res.ok) {
+      return res.text().then(function (body) { throw new Error(body || ('HTTP ' + res.status)) })
+    }
+    // A browser without a streaming reader still gets a usable answer: the
+    // whole body is buffered and parsed in one go.
+    if (!res.body || !res.body.getReader) {
+      return res.text().then(function (body) { chatParse(body, onEvent) })
+    }
+    var reader = res.body.getReader()
+    var decoder = new TextDecoder()
+    var buffer = ''
+    function pump() {
+      return reader.read().then(function (result) {
+        if (result.done) {
+          if (buffer) chatParse(buffer, onEvent)
+          return
+        }
+        buffer += decoder.decode(result.value, { stream: true })
+        // Only whole blocks are parsed, so a token split across two reads is
+        // never mistaken for malformed JSON.
+        var cut = buffer.lastIndexOf('\\n\\n')
+        if (cut >= 0) {
+          chatParse(buffer.slice(0, cut + 2), onEvent)
+          buffer = buffer.slice(cut + 2)
+        }
+        return pump()
+      })
+    }
+    return pump()
+  }).catch(function (err) {
+    if (err && err.name === 'AbortError') return
+    failed = true
+    say('出了点问题：' + String((err && err.message) || err), true, CHAT_REPLY_MAX_MS)
+  }).then(settle)
+}
+
+/** Hold a finished reply for a length that follows how much there is to read. */
+function holdReply(answer) {
+  var ms = clamp(CHAT_REPLY_MIN_MS + answer.length * CHAT_REPLY_MS_PER_CHAR, CHAT_REPLY_MIN_MS, CHAT_REPLY_MAX_MS)
+  // Re-stated from the accumulated answer rather than read back off the bubble:
+  // a work-status blip can land between the last token and this call.
+  say(answer, false, ms)
+}
+
+function openSay() {
+  if (sayOpen) {
+    try { sayInput.focus() } catch (err) {}
+    return
+  }
+  sayOpen = true
+  sayInput.classList.add('dshlp-on')
+  // Typing to someone who is asleep reads as talking to furniture.
+  if (state.sleeping) wake(true)
+  placeFloaters()
+  try { sayInput.focus() } catch (err) {}
+  if (!chatModels.length) chatLoadModels()
+}
+
+function closeSay() {
+  if (!sayOpen) return
+  sayOpen = false
+  sayInput.classList.remove('dshlp-on')
+  sayInput.blur()
+}
+
+function toggleSay() { if (sayOpen) closeSay(); else openSay() }
+
+/** Pull the model list out sideways, flipping it when the pet is near the edge. */
+function toggleModels(row) {
+  if (modelMenu.classList.contains('dshlp-on')) {
+    modelMenu.classList.remove('dshlp-on')
+    return
+  }
+  if (!chatModels.length) chatLoadModels()
+  modelMenu.style.top = (row.offsetTop || 0) + 'px'
+  modelMenu.classList.add('dshlp-on')
+  // Measured after showing: a hidden element reports no width.
+  modelMenu.classList.toggle('dshlp-flip', menu.getBoundingClientRect().right + modelMenu.offsetWidth + 6 > viewport().w)
+}
+
+sayInput.addEventListener('keydown', function (e) {
+  e.stopPropagation()
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    sendChat()
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    closeSay()
+  }
+})
+// The pet's own drag and menu handlers listen on the root, so interaction with
+// the input must not reach them.
+sayInput.addEventListener('pointerdown', function (e) { e.stopPropagation() })
+sayInput.addEventListener('contextmenu', function (e) {
+  e.preventDefault()
+  e.stopPropagation()
+})
+// A click anywhere else puts the input away, so it never has to be dismissed
+// twice. Two places are exempt: the input itself, and the menu — the menu owns
+// the row that toggles it, and closing here would make that row reopen the
+// input on the same gesture instead of closing it.
+document.addEventListener('pointerdown', function (e) {
+  if (!sayOpen) return
+  if (menu.contains(e.target) || sayInput.contains(e.target)) return
+  closeSay()
+}, true)
+
+
 root.addEventListener('pointerdown', onDown)
 root.addEventListener('pointermove', onMove)
 root.addEventListener('pointerup', onUp)
@@ -981,6 +1441,9 @@ if (stored) {
   // "Stay put" outlives a reload like the doze state does, so the menu row has
   // to be re-labelled for the state it was restored into.
   state.anchored = stored.anchored === true
+  // The chosen model outlives a reload: switching is a preference, not a
+  // per-conversation choice.
+  if (typeof stored.chatModel === 'string') chatModelKey = stored.chatModel
 }
 if (anchorButton) anchorButton.textContent = anchorLabel()
 state.y = groundTop()
@@ -1000,6 +1463,10 @@ pollTimer = setInterval(poll, POLL_MS)
 setInterval(checkSleep, 5000)
 
 window.addEventListener('beforeunload', function () {
+  // The conversation is page state and is never written anywhere, so closing the
+  // window already ends it. Dropping it here says so out loud rather than
+  // leaving the answer to be inferred from the absence of any persistence.
+  chatTurns = []
   if (raf) cancelAnimationFrame(raf)
   if (pollTimer) clearInterval(pollTimer)
 })
@@ -1167,6 +1634,244 @@ export default {
           known: WORK_STATES,
           staleMs: STALE_MS,
         }))
+      },
+    }))
+
+    // -----------------------------------------------------------------------
+    // Chat.
+    //
+    // The page runs in the renderer and cannot reach `ctx.llm`; the model list
+    // and the reply stream are therefore two more host routes rather than page
+    // work. Both go through `admitted()` because a route on the web server is
+    // outside the fence the shell puts around `/` and `/api`.
+    // -----------------------------------------------------------------------
+
+    /** Answer one rejected request with a short plain-text reason. */
+    function refuse(res, status, reason) {
+      res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })
+      res.end('chat unavailable: ' + reason)
+    }
+
+    /**
+     * Read the chat persona.
+     *
+     * Re-read per request rather than cached at load: it is a few kilobytes, and
+     * reading it fresh lets the wording be tuned between two messages, which is
+     * the whole point of iterating on a voice.
+     * @returns the persona text, or an empty string when neither candidate exists.
+     */
+    function readPersona() {
+      for (const file of PERSONA_CANDIDATES) {
+        try {
+          const text = fs.readFileSync(file, 'utf8').trim()
+          if (text) return text
+        } catch (err) {
+          // A missing candidate is the expected path: the profile copy and the
+          // packaged copy are alternatives, never both required.
+        }
+      }
+      return ''
+    }
+
+    /**
+     * Apply the shell's own request fence to one chat request.
+     *
+     * The connection service owns both the Host/Origin fence and the browser
+     * credential, and it is what makes `/` answer 401 to an unauthenticated
+     * caller. When it is absent this route refuses to serve rather than
+     * spending the user's credit for anyone who can reach the loopback port.
+     * @param req - the request to judge.
+     * @param res - the response to reject on.
+     * @returns true when the caller may proceed.
+     */
+    function admitted(req, res) {
+      const connection = ctx.get('connection')
+      if (connection === undefined) {
+        refuse(res, 503, 'the connection service is not loaded, so callers cannot be authenticated')
+        return false
+      }
+      const rejection = connection.requestRejection(req)
+      if (rejection !== undefined) {
+        refuse(res, rejection, rejection === 401 ? 'authentication required' : 'untrusted request origin')
+        return false
+      }
+      return true
+    }
+
+    /**
+     * Read and parse one JSON request body.
+     * @param req - the request to drain.
+     * @returns the parsed value, or null when the body is absent, oversized, or not JSON.
+     */
+    function readJson(req) {
+      return new Promise(resolve => {
+        const parts = []
+        let size = 0
+        let settled = false
+        const finish = value => {
+          if (settled) return
+          settled = true
+          resolve(value)
+        }
+        req.on('data', part => {
+          if (settled) return
+          size += part.length
+          if (size > CHAT_BODY_LIMIT) {
+            finish(null)
+            return
+          }
+          parts.push(part)
+        })
+        req.on('error', () => finish(null))
+        req.on('end', () => {
+          try {
+            finish(JSON.parse(Buffer.concat(parts).toString('utf8')))
+          } catch (err) {
+            // A body that is not JSON is a caller error, not a server fault.
+            finish(null)
+          }
+        })
+      })
+    }
+
+    /**
+     * Convert the page's conversation into request messages.
+     *
+     * The two roles take different types: a user turn is a one-shot input and
+     * carries no identity, while an assistant turn is a durable message and
+     * must name both its id and the route that produced it.
+     * @param raw - the `messages` field sent by the page.
+     * @param provider - provider route answering this request.
+     * @param model - model answering this request.
+     * @returns the request messages, oldest first.
+     */
+    function toMessages(raw, provider, model) {
+      const out = []
+      for (const turn of raw.slice(-CHAT_HISTORY_LIMIT)) {
+        if (turn === null || typeof turn !== 'object') continue
+        const text = typeof turn.text === 'string' ? turn.text.trim() : ''
+        if (!text) continue
+        if (turn.role === 'assistant') {
+          out.push({
+            role: 'assistant',
+            id: `luna-pet-${out.length}-${Date.now().toString(36)}`,
+            content: [{ type: 'text', text }],
+            source: { kind: 'model', provider, model },
+          })
+        } else {
+          out.push({ role: 'user', content: [{ type: 'text', text }] })
+        }
+      }
+      return out
+    }
+
+    disposers.push(ctx.webServer.register({
+      kind: 'exact',
+      path: '/dsh-luna-pet/chat-models.json',
+      handler: async (req, res) => {
+        if (!admitted(req, res)) return
+        const llm = ctx.get('llm')
+        if (llm === undefined) {
+          refuse(res, 503, 'the llm service is not loaded')
+          return
+        }
+        try {
+          const models = []
+          for (const provider of llm.listProviders()) {
+            for (const model of await llm.listModels(provider.id)) {
+              models.push({ provider: model.provider, id: model.id, name: model.name })
+            }
+          }
+          res.writeHead(200, CHAT_JSON_HEADERS)
+          res.end(JSON.stringify({ ok: true, models }))
+        } catch (err) {
+          res.writeHead(500, CHAT_JSON_HEADERS)
+          res.end(JSON.stringify({ ok: false, error: String((err && err.message) || err) }))
+        }
+      },
+    }))
+
+    disposers.push(ctx.webServer.register({
+      kind: 'exact',
+      path: '/dsh-luna-pet/chat',
+      handler: async (req, res) => {
+        if (!admitted(req, res)) return
+        if (req.method !== 'POST') {
+          res.writeHead(405, { ...CHAT_JSON_HEADERS, Allow: 'POST' })
+          res.end(JSON.stringify({ ok: false, error: 'use POST' }))
+          return
+        }
+        const llm = ctx.get('llm')
+        if (llm === undefined) {
+          refuse(res, 503, 'the llm service is not loaded')
+          return
+        }
+        const persona = readPersona()
+        if (!persona) {
+          refuse(res, 503, `no persona file; expected one of ${PERSONA_CANDIDATES.join(' , ')}`)
+          return
+        }
+
+        const body = await readJson(req)
+        if (body === null || typeof body !== 'object') {
+          res.writeHead(400, CHAT_JSON_HEADERS)
+          res.end(JSON.stringify({ ok: false, error: 'body must be a JSON object' }))
+          return
+        }
+        const provider = typeof body.provider === 'string' ? body.provider : ''
+        const model = typeof body.model === 'string' ? body.model : ''
+        const messages = toMessages(Array.isArray(body.messages) ? body.messages : [], provider, model)
+        if (!provider || !model || messages.length === 0) {
+          res.writeHead(400, CHAT_JSON_HEADERS)
+          res.end(JSON.stringify({ ok: false, error: 'provider, model and at least one non-empty message are required' }))
+          return
+        }
+
+        // Closing the window must stop the spend, so a dropped request aborts
+        // the model call instead of merely going unread.
+        const controller = new AbortController()
+        req.on('close', () => controller.abort())
+
+        res.writeHead(200, SSE_HEADERS)
+        // An opening comment flushes the head so the page's reader starts now
+        // rather than when the first token lands.
+        res.write(': open\n\n')
+        const emit = (event, data) => {
+          if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+        }
+
+        try {
+          let chars = 0
+          let finish = null
+          for await (const chunk of llm.stream({
+            provider,
+            model,
+            system: persona,
+            messages,
+            // Never the adapter default: see CHAT_REASONING_EFFORT.
+            reasoningEffort: CHAT_REASONING_EFFORT,
+            maxTokens: CHAT_MAX_TOKENS,
+            signal: controller.signal,
+          })) {
+            if (chunk.type === 'text-delta') {
+              chars += chunk.text.length
+              emit('delta', { text: chunk.text })
+            } else if (chunk.type === 'finish') {
+              const reason = chunk.reason
+              finish = reason && reason.kind ? reason.kind : null
+              // An adapter failure arrives as a finish reason, not a throw.
+              if (finish === 'error') {
+                const failure = reason.failure
+                emit('failed', { message: (failure && failure.message) || 'the model call failed' })
+              }
+            }
+          }
+          emit('done', { finish, chars })
+        } catch (err) {
+          emit('failed', { message: String((err && err.message) || err) })
+        } finally {
+          if (!res.writableEnded) res.end()
+        }
       },
     }))
 
