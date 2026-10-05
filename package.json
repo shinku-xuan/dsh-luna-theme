@@ -1,6 +1,6 @@
 {
   "name": "dsh-luna-theme",
-  "version": "0.10.0",
+  "version": "0.10.2",
   "private": true,
   "description": "Luna-Chat inspired palette, wallpaper and material restyle for the DSH desktop and web shells, plus an optional Luna balance widget, memory badge and desktop pet.",
   "license": "MIT",

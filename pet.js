@@ -37,6 +37,7 @@ const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url))
 const ART_IDS = [
   'idle',
   'walk-a',
+  'walk-cycle',
   'sleep',
   'drag',
   'thinking',
@@ -46,6 +47,18 @@ const ART_IDS = [
   'sad',
   'wave',
   'surprise',
+  'idle-cycle',
+  'sleep-cycle',
+  'drag-cycle',
+  'thinking-cycle',
+  'working-cycle',
+  'waiting-cycle',
+  'happy-cycle',
+  'sad-cycle',
+  'wave-cycle',
+  'surprise-cycle',
+  'fall',
+  'fall-cycle',
 ]
 
 /** Directories searched for one pose, in lookup order. */
@@ -212,10 +225,17 @@ var ROAM_MAX_MS = 11000
 var NEIGHBOUR_CACHE_MS = 250
 var WALK_SPEED = 34
 // The trip home crosses the whole band rather than one roaming leg, so the pet
-// walks it at three times the roaming pace. The step cadence rises with the
-// pace: at the roaming cadence the character would glide instead of walk.
+// covers it at three times the roaming pace. Its gait deliberately does not
+// follow: the cycle keeps the roaming cadence, so the hurry costs a step that
+// slides three times as far instead of a walk played three times as fast.
 var HOME_SPEED = 102
 var WALK_STEP_RATE = 7.4
+// One complete stride uses eight cells from a 4-by-2 sheet. Its distance is in
+// unscaled CSS pixels; larger pets take proportionally longer steps.
+var WALK_STRIDE_PX = 29
+var MOTION_FRAMES = 8
+var MOTION_SHEET_WIDTH = 1120
+var MOTION_SHEET_HEIGHT = 720
 var WALK_MIN_PX = 70
 var WALK_MAX_PX = 240
 var TURN_PAUSE_MS = 260
@@ -240,6 +260,7 @@ var WATCHDOG_MS = 4000
 var ART_IDS = [
   'idle',
   'walk-a',
+  'walk-cycle',
   'sleep',
   'drag',
   'thinking',
@@ -248,9 +269,38 @@ var ART_IDS = [
   'happy',
   'sad',
   'wave',
-  'surprise'
+  'surprise',
+  'idle-cycle',
+  'sleep-cycle',
+  'drag-cycle',
+  'thinking-cycle',
+  'working-cycle',
+  'waiting-cycle',
+  'happy-cycle',
+  'sad-cycle',
+  'wave-cycle',
+  'surprise-cycle',
+  'fall',
+  'fall-cycle'
 ]
 var IDLE_ART = 'idle'
+// Durations follow the drawn frames. Brief eyelid transitions sit between long
+// resting poses; direct reactions play once and hold until their pose expires.
+var ART_MOTIONS = {
+  idle: { sheet: 'idle-cycle', durations: [2200, 700, 80, 100, 80, 120, 600, 1700] },
+  // The walking atlas is stitched in playback order, so its cells play as drawn.
+  'walk-a': { sheet: 'walk-cycle', distance: true },
+  sleep: { sheet: 'sleep-cycle', durations: [500, 500, 500, 500, 500, 500, 500, 500] },
+  drag: { sheet: 'drag-cycle', durations: [90, 90, 90, 90, 90, 90, 90, 90] },
+  fall: { sheet: 'fall-cycle', durations: [100, 100, 100, 100, 100, 100, 100, 100] },
+  thinking: { sheet: 'thinking-cycle', durations: [900, 500, 300, 600, 80, 220, 600, 700] },
+  working: { sheet: 'working-cycle', durations: [300, 250, 250, 250, 250, 250, 250, 400] },
+  waiting: { sheet: 'waiting-cycle', durations: [350, 140, 140, 140, 140, 140, 140, 500] },
+  happy: { sheet: 'happy-cycle', durations: [100, 100, 100, 100, 100, 100, 100, 100] },
+  sad: { sheet: 'sad-cycle', durations: [650, 350, 250, 150, 250, 350, 650, 800] },
+  wave: { sheet: 'wave-cycle', durations: [100, 100, 130, 130, 130, 130, 120, 260], once: true },
+  surprise: { sheet: 'surprise-cycle', durations: [70, 80, 110, 120, 110, 130, 170, 260], once: true }
+}
 // Display height per pose, as a fraction of the box. The airborne pose is the
 // one the delivered set draws small: its straightened hair occupies a third of
 // the canvas, so at a shared height its body measures 0.76 of every other pose.
@@ -289,6 +339,7 @@ var css = [
   '.dshlp-flip{position:absolute;inset:0;transition:transform .18s ease;pointer-events:none}',
   '.dshlp-wob{position:absolute;inset:0;transform-origin:50% 100%;pointer-events:none}',
   '.dshlp-img{position:absolute;bottom:0;left:50%;height:100%;width:auto;transform:translateX(-50%);pointer-events:auto;cursor:grab;touch-action:none;-webkit-user-drag:none;user-select:none;filter:drop-shadow(0 3px 5px rgba(40,32,64,.22))}',
+  '.dshlp-motion{position:absolute;bottom:0;left:50%;height:100%;width:calc(var(--dshlp-h) * var(--dshlp-scale) * .777777778);transform:translateX(-50%);transform-origin:50% 100%;pointer-events:none;background-size:400% 200%;background-repeat:no-repeat;display:none;filter:drop-shadow(0 3px 5px rgba(40,32,64,.22))}',
   '.dshlp-root.dshlp-dragging .dshlp-img{cursor:grabbing}',
   '.dshlp-root.dshlp-sleeping .dshlp-img{cursor:default}',
   // The bubble and the menu wear the theme's SECOND control tier rather than a
@@ -379,6 +430,9 @@ img.className = 'dshlp-img'
 img.alt = '小仓朝日'
 img.draggable = false
 wob.appendChild(img)
+var motion = document.createElement('div')
+motion.className = 'dshlp-motion'
+wob.appendChild(motion)
 flip.appendChild(wob)
 root.appendChild(flip)
 
@@ -449,6 +503,7 @@ var anchorButton = null
 var pingMiss = 0
 var lastScale = -1
 var t = 0
+var walkPhase = 0
 
 function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v) }
 function rand(lo, hi) { return lo + Math.random() * (hi - lo) }
@@ -579,7 +634,7 @@ function stepWalk(dt) {
   if (Math.abs(dx) < 1.2) { endWalk(); return }
   var dir = dx > 0 ? 1 : -1
   state.facing = dir
-  var nx = state.x + (state.rushing ? HOME_SPEED : WALK_SPEED) * dt * dir
+  var nx = state.x + Math.min(Math.abs(dx), (state.rushing ? HOME_SPEED : WALK_SPEED) * dt) * dir
   var nb = state.rushing ? null : neighbourRect()
   if (nb) {
     // The widget is an obstacle, not a wall: stop short of it and re-plan. Only
@@ -590,8 +645,14 @@ function stepWalk(dt) {
     if (dir > 0 && state.x <= stopLeft && nx > stopLeft) { state.x = stopLeft; endWalk(); return }
     if (dir < 0 && state.x + boxW() >= stopRight && nx + boxW() < stopRight) { state.x = stopRight - boxW(); endWalk(); return }
   }
+  var previousX = state.x
   state.x = clamp(nx, minX(), maxX())
-  if (state.x <= minX() || state.x >= maxX()) endWalk()
+  // The cycle advances by ground covered, so the trip home would otherwise play
+  // it three times as fast. Its steps are measured at the roaming pace instead,
+  // which leaves the legs at their own tempo while the pet still hurries home.
+  var stepped = Math.abs(state.x - previousX) * (state.rushing ? WALK_SPEED / HOME_SPEED : 1)
+  walkPhase = (walkPhase + stepped / (WALK_STRIDE_PX * state.scale)) % 1
+  if (state.x === state.targetX || state.x <= minX() || state.x >= maxX()) endWalk()
 }
 
 function stepPhysics(dt) {
@@ -629,7 +690,7 @@ function frame(now) {
 
   if (state.dragging) {
     // position is driven by the pointer handler
-  } else if (state.mode === 'throw') {
+  } else if (state.mode === 'fall') {
     stepPhysics(dt)
   } else if (state.mode === 'walk') {
     stepWalk(dt)
@@ -652,8 +713,8 @@ function frame(now) {
 }
 
 function render(now) {
-  root.style.left = Math.round(state.x) + 'px'
-  root.style.top = Math.round(state.y) + 'px'
+  root.style.left = state.x.toFixed(2) + 'px'
+  root.style.top = state.y.toFixed(2) + 'px'
   // The input and the bubble hang off the pet, so they are re-placed wherever
   // the pet moves — a drag, a walk home, or a window resize all land here.
   if (sayOpen || bubbleTimer) placeFloaters()
@@ -669,18 +730,24 @@ function render(now) {
   var lean = 0
   var hop = 0
   if (state.mode === 'walk') {
-    var stepRate = WALK_STEP_RATE * (state.rushing ? HOME_SPEED / WALK_SPEED : 1)
-    hop = Math.abs(Math.sin(t * stepRate)) * -2.6
-    lean = Math.sin(t * stepRate) * 1.6 * state.facing
-  } else if (state.mode === 'throw') {
+    if (artReady['walk-cycle']) {
+      // The sheet already articulates the legs and arms; a small weight shift
+      // keeps the stance grounded without bouncing the whole character twice.
+      hop = (Math.cos(walkPhase * Math.PI * 4) - 1) * 0.35
+    } else {
+      // No rush multiplier on the fallback either, for the same reason.
+      hop = Math.abs(Math.sin(t * WALK_STEP_RATE)) * -2.6
+      lean = Math.sin(t * WALK_STEP_RATE) * 1.6 * state.facing
+    }
+  } else if (state.mode === 'fall') {
     lean = state.vx * 0.006
   } else if (state.sleeping) {
     // Dozing. Every flourish below is keyed on the status alone, so without
     // this branch a pet that fell asleep would hop in its sleep to announce a
     // turn that had just finished.
   } else if (state.working === 'waiting') {
-    lean = Math.sin(t * 12) * 2.2
-    hop = -1.4
+    lean = Math.sin(t * 12) * (artReady['waiting-cycle'] ? 0.65 : 2.2)
+    hop = artReady['waiting-cycle'] ? -0.3 : -1.4
   } else if (state.working === 'thinking') {
     lean = Math.sin(t * 3.2) * 1.1
   } else if (state.working === 'success') {
@@ -701,13 +768,18 @@ function render(now) {
 }
 
 // ---------------------------------------------------------------------------
-// Artwork: one pose per mood, swapped only once its file is decoded so a
-// missing or slow pose never blanks the character.
+// Static poses and motion sheets stay decoded for the page's lifetime.
+// Animation changes a sheet's crop, never its URL.
 // ---------------------------------------------------------------------------
 var shownArt = null
 var artReady = {}
 var artLoading = {}
 var artFailed = {}
+var motionSheet = null
+var motionPose = null
+var motionTrigger = null
+var motionStarted = 0
+var motionCell = -1
 
 function artSrc(id) { return IMAGE_URL + '?id=' + encodeURIComponent(id) }
 
@@ -715,6 +787,7 @@ function artSrc(id) { return IMAGE_URL + '?id=' + encodeURIComponent(id) }
 function moodArt() {
   if (state.dragging) return 'drag'
   if (state.pose && performance.now() < state.pose.until) return state.pose.id
+  if (state.mode === 'fall') return 'fall'
   // Waiting on the model is the pet's own thinking, and it outranks the Host's
   // state: the character asked the question here, not in the conversation.
   if (chatBusy) return 'thinking'
@@ -732,7 +805,8 @@ function moodArt() {
 
 /** Answer the user directly for a moment, then fall back to the mood. */
 function holdPose(id, ms) {
-  state.pose = { id: id, until: performance.now() + ms }
+  var at = performance.now()
+  state.pose = { id: id, at: at, until: at + ms }
 }
 
 function preloadArt(id) {
@@ -743,17 +817,40 @@ function preloadArt(id) {
   if (artReady[id] || artLoading[id] || artFailed[id]) return
   artLoading[id] = true
   var probe = new Image()
-  probe.onload = function () {
+  function ready() {
+    if (id.slice(-6) === '-cycle' && (probe.naturalWidth !== MOTION_SHEET_WIDTH || probe.naturalHeight !== MOTION_SHEET_HEIGHT)) {
+      failed()
+      return
+    }
     artLoading[id] = false
-    artReady[id] = true
+    artReady[id] = probe
     applyArt()
   }
-  probe.onerror = function () {
+  function failed() {
     artLoading[id] = false
     artFailed[id] = true
     applyArt()
   }
+  probe.onload = function () {
+    if (probe.decode) probe.decode().then(ready, failed)
+    else ready()
+  }
+  probe.onerror = failed
   probe.src = artSrc(id)
+}
+
+/** The drawn frame at an elapsed time, or at the travelled stride distance. */
+function motionFrame(spec, now) {
+  if (spec.distance) return Math.floor(walkPhase * MOTION_FRAMES)
+  var duration = 0
+  for (var i = 0; i < spec.durations.length; i++) duration += spec.durations[i]
+  var elapsed = Math.max(0, now - motionStarted)
+  var at = spec.once ? Math.min(elapsed, duration - 1) : elapsed % duration
+  for (var cell = 0; cell < spec.durations.length; cell++) {
+    if (at < spec.durations[cell]) return cell
+    at -= spec.durations[cell]
+  }
+  return MOTION_FRAMES - 1
 }
 
 function applyArt() {
@@ -763,11 +860,37 @@ function applyArt() {
   // shell untouched rather than parking a broken image over the UI.
   if (artFailed[want]) want = IDLE_ART
   if (artFailed[want]) { root.style.display = 'none'; return }
-  if (want === shownArt) return
   if (!artReady[want]) { preloadArt(want); return }
-  shownArt = want
-  img.style.height = Math.round((ART_HEIGHT[want] || 1) * 100) + '%'
-  img.src = artSrc(want)
+  if (want !== shownArt) {
+    shownArt = want
+    img.style.height = Math.round((ART_HEIGHT[want] || 1) * 100) + '%'
+    img.src = artSrc(want)
+  }
+  var spec = ART_MOTIONS[want]
+  if (spec) preloadArt(spec.sheet)
+  var animated = !!(spec && artReady[spec.sheet])
+  motion.style.display = animated ? 'block' : 'none'
+  img.style.opacity = animated ? '0' : '1'
+  if (!animated) { motionPose = null; return }
+  var now = performance.now()
+  var trigger = state.pose && state.pose.id === want && now < state.pose.until ? state.pose.at : null
+  if (motionPose !== want || motionTrigger !== trigger) {
+    motionPose = want
+    motionTrigger = trigger
+    motionStarted = trigger === null ? now : trigger
+    motionCell = -1
+  }
+  if (motionSheet !== spec.sheet) {
+    motionSheet = spec.sheet
+    motion.style.backgroundImage = 'url("' + artSrc(spec.sheet) + '")'
+    motion.style.transform = 'translateX(-50%) scale(' + (ART_HEIGHT[want] || 1) + ')'
+    motionCell = -1
+  }
+  var cell = motionFrame(spec, now)
+  if (cell !== motionCell) {
+    motionCell = cell
+    motion.style.backgroundPosition = (cell % 4 * 100 / 3).toFixed(6) + '% ' + (cell < 4 ? '0%' : '100%')
+  }
 }
 
 img.addEventListener('error', function () {
@@ -810,6 +933,7 @@ function onMove(e) {
     // the 'z' keeps drifting over a character that is being held in the air.
     zzz.classList.remove('dshlp-on')
     state.mode = 'drag'
+    state.pose = null
     state.targetX = null
     state.rushing = false
   }
@@ -857,7 +981,8 @@ function onUp(e) {
   }
   state.vx = v.vx
   state.vy = v.vy
-  state.mode = (v.vx === 0 && v.vy === 0) ? 'idle' : 'throw'
+  // A stationary release above the floor still has height to fall through.
+  state.mode = (v.vx !== 0 || v.vy !== 0 || state.y < groundTop()) ? 'fall' : 'idle'
   if (state.mode === 'idle') state.y = groundTop()
   state.nextRoamAt = 0
   state.lastInput = Date.now()
@@ -953,7 +1078,7 @@ function poll() {
 // neighbour when the pet walks up to it.
 // ---------------------------------------------------------------------------
 function applyNeighbourMood(now) {
-  if (state.working || state.dragging || state.mode === 'throw') return
+  if (state.working || state.dragging || state.mode === 'fall') return
   var nb = neighbourRect()
   if (!nb) return
   var cx = state.x + boxW() / 2
@@ -997,7 +1122,7 @@ function sleep(greet) {
  */
 function checkSleep() {
   if (state.sleeping || state.dragging || state.working) return
-  if (state.mode === 'walk' || state.mode === 'throw') return
+  if (state.mode === 'walk' || state.mode === 'fall') return
   if (Date.now() - Math.max(state.lastInput, state.lastTaskAt) < SLEEP_IDLE_MS) return
   sleep(false)
 }
@@ -1450,12 +1575,22 @@ state.y = groundTop()
 state.x = clamp(state.x, minX(), maxX())
 state.nextRoamAt = performance.now() + rand(2400, 6000)
 if (state.sleeping) zzz.classList.add('dshlp-on')
-// The default pose is requested up front so the character is there on the first
-// frame; every other pose is fetched the first time its mood comes up, and the
-// swap waits for the file instead of blanking the character.
+// Common interactive motions are prepared before first use. Other moods keep
+// the current decoded picture until their own resource is ready.
 shownArt = IDLE_ART
 artReady[IDLE_ART] = true
 img.src = artSrc(IDLE_ART)
+preloadArt('walk-a')
+preloadArt('walk-cycle')
+preloadArt('idle-cycle')
+preloadArt('drag')
+preloadArt('drag-cycle')
+preloadArt('fall')
+preloadArt('fall-cycle')
+preloadArt('surprise')
+preloadArt('surprise-cycle')
+preloadArt('wave')
+preloadArt('wave-cycle')
 render(performance.now())
 raf = requestAnimationFrame(frame)
 poll()
@@ -1549,8 +1684,7 @@ export default {
         const bytes = fs.readFileSync(file)
         return bytes && bytes.length > 0 ? bytes : null
       } catch (err) {
-        // A missing candidate is the expected path: the per-pose set is local
-        // and the published package carries none of it.
+        // A profile may supply only some poses; absent overrides use packaged art.
         return null
       }
     }
@@ -1570,7 +1704,9 @@ export default {
         }
         if (loaded) break
       }
-      if (!loaded) {
+      // A motion sheet cannot use a single-pose fallback: eight cells would crop
+      // that pose into fragments. The page retains the matching static pose.
+      if (!loaded && !id.endsWith('-cycle')) {
         for (const file of SINGLE_IMAGE_CANDIDATES) {
           const bytes = readArt(file)
           if (bytes) {
