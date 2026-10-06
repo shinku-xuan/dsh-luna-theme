@@ -1,8 +1,8 @@
 {
   "name": "dsh-luna-theme",
-  "version": "0.10.2",
+  "version": "0.12.0",
   "private": true,
-  "description": "Luna-Chat inspired palette, wallpaper and material restyle for the DSH desktop and web shells, plus an optional Luna balance widget, memory badge and desktop pet.",
+  "description": "Luna theme for DSH, with a balance widget, memory badge, Asahi desktop pet and an optional title opening with voice playback.",
   "license": "MIT",
   "type": "module",
   "main": "index.js",
@@ -11,6 +11,7 @@
     "./client": "./client.js",
     "./widget": "./widget.js",
     "./pet": "./pet.js",
+    "./opening": "./opening.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -18,6 +19,7 @@
     "client.js",
     "widget.js",
     "pet.js",
+    "opening.js",
     "cordis.patch.yml",
     "README.md",
     "LICENSE",
@@ -25,8 +27,11 @@
     "assets/wallpaper.webp",
     "assets/luna-settings.webp",
     "assets/luna-noon.webp",
+    "assets/luna-bot.png",
     "assets/asahi.webp",
     "assets/pet-art",
+    "assets/opening",
+    "preview/opening.html",
     "persona/asahi-chat.md"
   ],
   "dsh": {

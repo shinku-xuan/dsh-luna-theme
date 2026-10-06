@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luna 开场动画预览</title>
+  <style>
+    html, body { height: 100%; margin: 0; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #17141c; color: #f3edf4; }
+    #screen { height: 100%; display: grid; place-items: center; }
+    #app { text-align: center; line-height: 2; }
+    #controls { position: fixed; z-index: 100001; top: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; border-radius: 8px; background: #17141ce8; max-width: calc(100vw - 44px); font-size: 12px; }
+    button, select { font: inherit; padding: 4px 10px; border: 1px solid #9e8fa8; border-radius: 5px; background: #302737; color: #fff; cursor: pointer; }
+    #phase { min-width: 100px; align-self: center; }
+    #log { max-height: 140px; overflow: auto; margin: 0; position: fixed; z-index: 100001; bottom: 12px; left: 12px; padding: 12px; font-size: 11px; background: #17141ce8; pointer-events: none; }
+    #log[hidden] { display: none; }
+    .boot { height: 100%; width: 100%; display: grid; place-items: center; }
+    .card { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+    .wordmark { font-size: 16px; letter-spacing: .08em; }
+    .hint { font-size: 12px; }
+    .spinner { position: relative; width: 20px; height: 20px; }
+  </style>
+</head>
+<body>
+  <div id="screen"><div id="app">开场动画预览<br>语音结束后回到这里</div></div>
+  <div id="controls">
+    <button id="replay">完整重播</button>
+    <button id="hold">停留主界面</button>
+    <button id="boot">启动页</button>
+    <button id="theme">切换浅色/深色</button>
+    <select id="frame" aria-label="定格时间">
+      <option value="">实时动画</option>
+      <option value="800">中央近景 0.8 秒</option>
+      <option value="2500">拉远 2.5 秒</option>
+      <option value="4300">角色就位</option>
+      <option value="5600">Logo 展开</option>
+      <option value="7000">完成构图</option>
+    </select>
+    <span id="phase">准备中</span>
+  </div>
+  <pre id="log" hidden></pre>
+  <script>
+    (function () {
+      var base = location.protocol === 'file:' ? new URL('../assets/opening/', location.href).href : new URL('./', location.href).href
+      for (var file of ['boot-skin.css', 'splash.css']) {
+        var link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = base + file
+        document.head.appendChild(link)
+      }
+      var script = document.createElement('script')
+      script.src = base + 'splash.js'
+      script.onload = start
+      document.head.appendChild(script)
+      function start() {
+        var params = new URLSearchParams(location.search)
+        var screen = document.getElementById('screen')
+        var phase = document.getElementById('phase')
+        var log = document.getElementById('log')
+        var stop = function () {}
+        var records = []
+        var origin = performance.now()
+        var labels = { loading: '读取素材', scene: '镜头拉远', blackout: '渐黑', black: '全黑', voice: '播放语音', 'awaiting-voice': '等待点击播放', 'audio-error': '语音加载失败', 'image-error': '图片加载失败', closing: '结束' }
+        function record(value) {
+          records.push(Math.round(performance.now() - origin) + 'ms ' + value)
+          log.textContent = records.join('\n')
+        }
+        function freeze() {
+          var at = document.getElementById('frame').value
+          var root = document.querySelector('[data-luna-splash]')
+          if (!root) return
+          for (var animation of root.getAnimations({ subtree: true })) {
+            if (at) { animation.currentTime = Number(at); animation.pause() }
+            else animation.play()
+          }
+        }
+        function show(hold) {
+          stop()
+          records = []
+          origin = performance.now()
+          screen.innerHTML = '<div id="app">开场动画预览<br>语音结束后回到这里</div>'
+          stop = window.__LUNA_SPLASH__.mount(screen, {
+            assetBase: base,
+            sceneMs: hold ? 0 : 7600,
+            onPhase: function (value) {
+              phase.textContent = labels[value] || value
+              record(value)
+              if (value === 'scene') requestAnimationFrame(freeze)
+            },
+            onClose: function (skipped) {
+              phase.textContent = skipped ? '已跳过' : '语音结束 · 进入应用'
+              record(skipped ? 'skipped' : 'complete')
+            }
+          })
+          var audio = screen.querySelector('audio')
+          audio.addEventListener('playing', function () {
+            var opacity = getComputedStyle(screen.querySelector('.luna-splash-blackout')).opacity
+            record('audio-playing; black-opacity=' + opacity)
+          })
+          audio.addEventListener('ended', function () { record('audio-ended') })
+        }
+        document.getElementById('replay').onclick = function () { document.getElementById('frame').value = ''; show(false) }
+        document.getElementById('hold').onclick = function () { show(true) }
+        document.getElementById('frame').onchange = freeze
+        document.getElementById('boot').onclick = function () {
+          stop()
+          screen.innerHTML = '<div class="boot" data-dsh-boot><div class="card"><div class="wordmark">HARNESS</div><div class="spinner" data-dsh-boot-spinner></div><div class="hint">Loading plugins…</div></div></div>'
+          phase.textContent = '启动页'
+        }
+        document.getElementById('theme').onclick = function () {
+          document.body.toggleAttribute('data-ds-dark-theme')
+          if (screen.querySelector('[data-luna-splash]')) show(document.getElementById('frame').value !== '' || params.get('force') === 'splash')
+        }
+        if (params.get('theme') === 'dark') document.body.setAttribute('data-ds-dark-theme', '')
+        if (params.has('freeze')) document.getElementById('frame').value = params.get('freeze')
+        log.hidden = !params.has('trace')
+        if (params.get('force') === 'boot') document.getElementById('boot').click()
+        else show(params.get('force') === 'splash' || params.has('freeze'))
+      }
+    })()
+  </script>
+</body>
+</html>

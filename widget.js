@@ -20,22 +20,11 @@ import { fileURLToPath } from 'node:url'
 /** Directory holding this module and the `assets/` directory beside it. */
 const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url))
 
-// The shipped art resolves beside this module, so the packed plugin is
-// self-contained. The profile-root entries after it are migration fallbacks for
-// an install whose artwork sits next to the profile's `cordis.patch.yml`, which
-// is where this widget lived before it joined the bundle.
-//
-// The shipped art is Luna-Chat's keychain schedule image, copied byte-for-byte
-// from the `api-balance-keychain/api_balance_noon.webp` asset in the Luna-Chat
-// front end. It is the same thinking-bubble composition as the whale art the
-// widget originally shipped (bubble centre 43.55%/25.26% of the square against
-// 44.20%/25.54%), so the text block needs only the small offset below.
+// The portrait is separate from the white balance bubble, which the page
+// renders at the existing reading position. Replacing the portrait therefore
+// cannot erase the balance display or change its refresh hit area.
 const IMAGE_CANDIDATES = [
-  path.join(PLUGIN_DIR, 'assets', 'luna-noon.webp'),
-  path.join(PLUGIN_DIR, 'luna-noon.webp'),
-  path.join(PLUGIN_DIR, 'DSniang02.png'),
-  path.join(PLUGIN_DIR, '..', '..', 'luna-noon.webp'),
-  path.join(PLUGIN_DIR, '..', '..', 'DSniang02.png'),
+  path.join(PLUGIN_DIR, 'assets', 'luna-bot.png'),
 ]
 
 // The artwork may be WebP or PNG, so the served type follows the file that won.
@@ -80,22 +69,51 @@ var FETCH_TIMEOUT_MS = 25000
 var BALANCE_URL = '/dsh-whale/balance.json'
 var SIZE_URL = '/dsh-whale/size.json'
 var IMG_URL = '/dsh-whale/widget-image.png'
+var HANDLE_WIDTH = 28
+var disposed = false
+var activeAbort = null
+
+var messages = {
+  zh: { balance: 'DeepSeek 余额', smaller: '缩小', larger: '放大', collapse: '收起余额挂件', expand: '展开余额挂件', loading: '加载中…', retry: '获取失败 · 点击重试', refresh: '点击刷新' },
+  en: { balance: 'DeepSeek balance', smaller: 'Zoom out', larger: 'Zoom in', collapse: 'Collapse balance widget', expand: 'Expand balance widget', loading: 'Loading…', retry: 'Failed · Click to retry', refresh: 'Click to refresh' }
+}
+function t(key) {
+  return messages[/^zh/i.test(document.documentElement.lang || navigator.language) ? 'zh' : 'en'][key]
+}
 
 var css = [
-  '.dshwv-root{position:fixed;right:0;bottom:0;--dshw-scale:1;--dshw-base:clamp(96px,calc(min(196px,min(100vw,100vh) * 0.22) * var(--dshw-scale)),292px);width:var(--dshw-base);height:var(--dshw-base);cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;z-index:9999;font-family:inherit;transition:left .16s ease,top .16s ease,transform .3s ease}',
-  '.dshwv-root.dshwv-left{transform:scaleX(-1)}',
+  '.dshwv-root{position:fixed;right:0;bottom:0;--dshw-scale:1;--dshw-base:clamp(96px,calc(min(196px,min(100vw,100vh) * 0.22) * var(--dshw-scale)),292px);width:var(--dshw-base);height:var(--dshw-base);cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;z-index:9999;font-family:inherit;transition:left .3s ease,top .16s ease}',
+  '.dshwv-root.dshwv-left .dshwv-body{scale:-1 1}',
+  // The left dock mirrors the whole body, which mirrors the portrait with it.
+  // This flip cancels that one so the artwork keeps the orientation it is drawn in.
+  '.dshwv-root.dshwv-left .dshwv-img{scale:-1 1}',
   '.dshwv-root.dshwv-dragging{cursor:grabbing;transition:none}',
-  '.dshwv-body{position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:50% 100%;transition:transform .22s cubic-bezier(.34,1.56,.64,1)}',
-  '.dshwv-img{width:var(--dshw-base);height:var(--dshw-base);display:block;pointer-events:none;-webkit-user-drag:none;user-select:none}',
-  '.dshwv-text{position:absolute;left:43.55%;top:25.26%;transform:translate(-50%,-50%);text-align:center;color:#536ba9;line-height:1.18;white-space:nowrap;--dshw-u:calc(var(--dshw-base) / 1026);pointer-events:none;transition:transform .3s ease}',
+  '.dshwv-root.dshwv-resizing{transition:none}',
+  '.dshwv-body{position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:50% 100%;transition:transform .22s cubic-bezier(.34,1.56,.64,1),visibility 0s}',
+  '.dshwv-img{position:absolute;right:0;bottom:0;width:62%;height:62%;scale:-1 1;border-radius:var(--dsw-radius-lg,12px);corner-shape:round;display:block;pointer-events:none;-webkit-user-drag:none;user-select:none}',
+  '.dshwv-bubble{position:absolute;left:5.5%;top:1%;width:76%;height:48%;box-sizing:border-box;border:calc(var(--dshw-base) * .018) solid #33466b;border-radius:50%;corner-shape:round;background:#fff;pointer-events:none}',
+  '.dshwv-bubble:before,.dshwv-bubble:after{content:"";position:absolute;box-sizing:border-box;border:calc(var(--dshw-base) * .014) solid #33466b;border-radius:50%;corner-shape:round;background:#fff}',
+  '.dshwv-bubble:before{width:12%;height:15%;left:30%;top:104%}',
+  '.dshwv-bubble:after{width:8%;height:11%;left:43%;top:126%}',
+  '.dshwv-text{position:absolute;left:43.55%;top:25.26%;transform:translate(-50%,-50%);text-align:center;color:#4a3a7a;line-height:1.18;white-space:nowrap;--dshw-u:calc(var(--dshw-base) / 1026);pointer-events:none}',
   '.dshwv-root.dshwv-left .dshwv-text{transform:translate(-50%,-50%) scaleX(-1)}',
-  '.dshwv-label{font-size:calc(var(--dshw-u) * 68);font-weight:600;letter-spacing:.06em}',
-  '.dshwv-amount{font-size:calc(var(--dshw-u) * 119);font-weight:800;line-height:1.05}',
-  '.dshwv-hint{font-size:calc(var(--dshw-u) * 54);color:#9fb0d9;letter-spacing:.02em}',
-  '.dshwv-size{position:absolute;top:4px;right:4px;display:flex;gap:4px;opacity:0;transition:opacity .15s ease;z-index:2}',
-  '.dshwv-root:hover .dshwv-size{opacity:1}',
-  '.dshwv-size button{width:20px;height:20px;border:none;border-radius:50%;background:rgba(83,107,169,.85);color:#fff;font-size:13px;line-height:1;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center;user-select:none}',
-  '.dshwv-size button:hover{background:#536ba9}'
+  '.dshwv-label{font-size:calc(var(--dshw-u) * 68);font-weight:500;letter-spacing:.02em}',
+  '.dshwv-amount{font-size:calc(var(--dshw-u) * 119);font-weight:500;line-height:1.12;font-variant-numeric:tabular-nums}',
+  '.dshwv-hint{font-size:calc(var(--dshw-u) * 54);color:#544c6e;letter-spacing:.02em}',
+  '.dshwv-size{position:absolute;top:4px;left:-62px;display:flex;gap:4px;z-index:2}',
+  '.dshwv-control{width:26px;height:26px;box-sizing:border-box;border:1.5px solid var(--luna-sub-edge);border-radius:var(--dsw-radius-md,8px);background:var(--luna-sub-plate-strong);backdrop-filter:var(--dsw-menu-backdrop-filter);color:var(--luna-sub-ink);font:inherit;font-size:16px;font-weight:500;line-height:1;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center;user-select:none}',
+  '.dshwv-control:hover{border-color:var(--luna-sub-edge-hover);background:var(--luna-sub-plate-hover);color:var(--luna-sub-ink-hover)}',
+  '.dshwv-control:focus-visible{outline:2px solid var(--luna-sub-ink);outline-offset:2px}',
+  '.dshwv-control:disabled{opacity:.45;cursor:default}',
+  '.dshwv-toggle{position:absolute;left:0;bottom:8px;width:28px;height:36px;z-index:3}',
+  '.dshwv-size,.dshwv-toggle{opacity:0;pointer-events:none;transition:opacity .15s ease}',
+  '.dshwv-root.dshwv-near .dshwv-size,.dshwv-root.dshwv-near .dshwv-toggle,.dshwv-root:has(.dshwv-control:focus-visible) .dshwv-size,.dshwv-root:has(.dshwv-control:focus-visible) .dshwv-toggle{opacity:1;pointer-events:auto}',
+  '.dshwv-root.dshwv-left .dshwv-toggle{left:auto;right:0}',
+  '.dshwv-root.dshwv-collapsed{cursor:default;pointer-events:none}',
+  '.dshwv-root.dshwv-collapsed .dshwv-body{visibility:hidden;transition:transform .22s cubic-bezier(.34,1.56,.64,1),visibility 0s .3s}',
+  '.dshwv-size[hidden]{display:none}',
+  '@media(pointer:coarse){.dshwv-size,.dshwv-toggle{opacity:1;pointer-events:auto}}',
+  '@media(prefers-reduced-motion:reduce){.dshwv-root,.dshwv-body,.dshwv-size,.dshwv-toggle{transition:none}}'
 ].join('\\n')
 
 var styleEl = document.createElement('style')
@@ -111,32 +129,42 @@ document.head.appendChild(styleEl)
 
 var root = document.createElement('div')
 root.className = 'dshwv-root'
+root.id = 'luna-balance-widget'
 
 var img = document.createElement('img')
 img.className = 'dshwv-img'
 img.src = IMG_URL
-img.alt = 'DeepSeek 余额'
+img.alt = ''
 img.draggable = false
 
 var sizeBox = document.createElement('div')
 sizeBox.className = 'dshwv-size'
-function makeBtn(text, title, delta) {
+function makeBtn(text, key, action) {
   var b = document.createElement('button')
   b.type = 'button'
+  b.className = 'dshwv-control'
   b.textContent = text
-  b.title = title
+  b.title = t(key)
+  b.setAttribute('aria-label', t(key))
+  b.dataset.lunaLabel = key
   b.addEventListener('pointerdown', function (e) { e.stopPropagation() })
-  b.addEventListener('click', function (e) { e.stopPropagation(); adjust(delta) })
+  b.addEventListener('click', function (e) { e.stopPropagation(); action() })
   return b
 }
-sizeBox.appendChild(makeBtn('-', '缩小', -STEP))
-sizeBox.appendChild(makeBtn('+', '放大', STEP))
+var smallerBtn = makeBtn('−', 'smaller', function () { adjust(-STEP) })
+var largerBtn = makeBtn('+', 'larger', function () { adjust(STEP) })
+sizeBox.appendChild(smallerBtn)
+sizeBox.appendChild(largerBtn)
+var toggleBtn = makeBtn('›', 'collapse', toggleCollapsed)
+toggleBtn.classList.add('dshwv-toggle')
+toggleBtn.setAttribute('aria-controls', 'luna-balance-content')
+toggleBtn.setAttribute('aria-expanded', 'true')
 
 var textBox = document.createElement('div')
 textBox.className = 'dshwv-text'
 var labelEl = document.createElement('div')
 labelEl.className = 'dshwv-label'
-labelEl.textContent = 'DeepSeek 余额'
+labelEl.textContent = t('balance')
 var amountEl = document.createElement('div')
 amountEl.className = 'dshwv-amount'
 var hintEl = document.createElement('div')
@@ -147,10 +175,15 @@ textBox.appendChild(hintEl)
 
 var body = document.createElement('div')
 body.className = 'dshwv-body'
+body.id = 'luna-balance-content'
+var bubble = document.createElement('div')
+bubble.className = 'dshwv-bubble'
 body.appendChild(img)
-body.appendChild(sizeBox)
+body.appendChild(bubble)
 body.appendChild(textBox)
 root.appendChild(body)
+root.appendChild(sizeBox)
+root.appendChild(toggleBtn)
 document.body.appendChild(root)
 
 // Position model: the widget is ALWAYS expressed in left/top px (so edge snaps
@@ -166,10 +199,11 @@ var state = {
   vOff: 0,
   left: 0,
   top: 0,
+  collapsed: false,
+  dockSide: 'right',
   balance: null,
   currency: null,
-  status: 'loading',
-  message: ''
+  status: 'loading'
 }
 var busy = false
 var settleTimer = null
@@ -192,7 +226,7 @@ function fmt(balance, currency) {
 function animateAmount(from, to, currency, duration) {
   if (animId) cancelAnimationFrame(animId)
   if (from === null || !isFinite(from)) from = to
-  if (from === to) {
+  if (from === to || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     shown = to
     amountEl.textContent = fmt(to, currency)
     return
@@ -218,23 +252,46 @@ function render() {
   var amount, hint
   if (state.status === 'loading') {
     amount = shown !== null ? fmt(shown, state.currency) : '…'
-    hint = '加载中…'
+    hint = t('loading')
   } else if (state.status === 'error') {
     amount = shown !== null ? fmt(shown, state.currency) : '--'
-    hint = state.message ? state.message.slice(0, 14) : '获取失败 · 点击重试'
+    hint = t('retry')
   } else {
     amount = shown !== null ? fmt(shown, state.currency) : (state.balance !== null ? fmt(state.balance, state.currency) : '--')
-    hint = state.status === 'changing' ? '加载中…' : '点击刷新'
+    hint = state.status === 'changing' ? t('loading') : t('refresh')
   }
   amountEl.textContent = amount
   hintEl.textContent = hint
 }
 function express() {
+  var vp = viewport()
+  var w = root.offsetWidth
+  var side = state.collapsed ? state.dockSide : state.h
   root.style.right = 'auto'
   root.style.bottom = 'auto'
-  root.style.left = state.left + 'px'
+  root.style.left = (state.collapsed ? (side === 'left' ? HANDLE_WIDTH - w : vp.w - HANDLE_WIDTH) : state.left) + 'px'
   root.style.top = state.top + 'px'
-  root.classList.toggle('dshwv-left', state.h === 'left')
+  var controlWidth = sizeBox.offsetWidth || 56
+  var controlsOnRight = state.left + w / 2 < vp.w / 2
+  sizeBox.style.left = clamp(controlsOnRight ? w + 6 : -controlWidth - 6, 4 - state.left, vp.w - controlWidth - 4 - state.left) + 'px'
+  root.classList.toggle('dshwv-left', side === 'left')
+  root.classList.toggle('dshwv-collapsed', state.collapsed)
+  body.inert = state.collapsed
+  body.setAttribute('aria-hidden', String(state.collapsed))
+  sizeBox.hidden = state.collapsed
+  toggleBtn.textContent = (side === 'left') === state.collapsed ? '›' : '‹'
+  toggleBtn.dataset.lunaLabel = state.collapsed ? 'expand' : 'collapse'
+  toggleBtn.title = t(toggleBtn.dataset.lunaLabel)
+  toggleBtn.setAttribute('aria-label', toggleBtn.title)
+  toggleBtn.setAttribute('aria-expanded', String(!state.collapsed))
+  smallerBtn.disabled = state.scale <= MIN_SCALE
+  largerBtn.disabled = state.scale >= MAX_SCALE
+}
+function toggleCollapsed() {
+  if (!state.collapsed) state.dockSide = state.left + root.offsetWidth / 2 < viewport().w / 2 ? 'left' : 'right'
+  state.collapsed = !state.collapsed
+  settle()
+  toggleBtn.focus({ preventScroll: true })
 }
 function settle() {
   var vp = viewport()
@@ -264,18 +321,20 @@ function settle() {
   express()
 }
 function refresh(manual) {
-  if (busy) return
+  if (busy || disposed) return
   busy = true
   if (manual || state.balance === null) { state.status = 'loading'; render() }
   var ctrl = null
   var timer = null
   try {
     ctrl = new AbortController()
+    activeAbort = ctrl
     timer = setTimeout(function () { try { ctrl.abort() } catch (err) {} }, FETCH_TIMEOUT_MS)
   } catch (err) {}
   fetch(BALANCE_URL, { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
     .then(function (r) { return r.json() })
     .then(function (data) {
+      if (disposed) return
       if (data && data.ok) {
         var nb = Number(data.totalBalance)
         var nc = String(data.currency || 'CNY')
@@ -283,7 +342,6 @@ function refresh(manual) {
         var currencyChanged = state.currency !== null && nc !== state.currency
         state.balance = nb
         state.currency = nc
-        state.message = ''
         if (changed && !currencyChanged) {
           if (!manual) {
             state.status = 'changing'
@@ -305,17 +363,17 @@ function refresh(manual) {
         }
       } else {
         state.status = 'error'
-        state.message = (data && data.error) ? String(data.error) : '获取失败'
         render()
       }
     })
     .catch(function () {
+      if (disposed) return
       state.status = 'error'
-      state.message = '获取失败'
       render()
     })
     .finally(function () {
       busy = false
+      activeAbort = null
       if (timer) clearTimeout(timer)
     })
 }
@@ -324,7 +382,7 @@ function adjust(delta) {
   state.scale = next
   root.style.setProperty('--dshw-scale', String(next))
   try {
-    fetch(SIZE_URL, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scale: next }) })
+    fetch(SIZE_URL, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scale: next }) }).catch(function (err) { /* A failed size save keeps the current page scale. */ })
   } catch (err) {}
   settle()
 }
@@ -336,7 +394,7 @@ function pressUp() {
   body.style.transform = 'scaleY(1) scaleX(1)'
 }
 function onPointerDown(e) {
-  if (e.button !== 0) return
+  if (e.button !== 0 || state.collapsed) return
   try { root.setPointerCapture(e.pointerId) } catch (err) {}
   var vp = viewport()
   var rect = root.getBoundingClientRect()
@@ -399,9 +457,38 @@ root.addEventListener('pointerdown', onPointerDown)
 root.addEventListener('pointermove', onPointerMove)
 root.addEventListener('pointerup', function (e) { endDrag(e, true) })
 root.addEventListener('pointercancel', function (e) { endDrag(e, false) })
-window.addEventListener('resize', function () {
+function onControlsPointerMove(e) {
+  if (e.pointerType === 'touch') return
+  var regions = state.collapsed ? [toggleBtn] : [root, sizeBox]
+  var near = regions.some(function (element) {
+    var rect = element.getBoundingClientRect()
+    return e.clientX >= rect.left - 24 && e.clientX <= rect.right + 24 &&
+      e.clientY >= rect.top - 24 && e.clientY <= rect.bottom + 24
+  })
+  root.classList.toggle('dshwv-near', near)
+}
+function hideControls() { root.classList.remove('dshwv-near') }
+document.addEventListener('pointermove', onControlsPointerMove)
+document.addEventListener('pointerleave', hideControls)
+window.addEventListener('blur', hideControls)
+function onResize() {
+  root.classList.add('dshwv-resizing')
   settle()
+  // Flush layout without transitions to keep the edge handle in the resized viewport.
+  root.getBoundingClientRect()
+  root.classList.remove('dshwv-resizing')
+}
+window.addEventListener('resize', onResize)
+var localeObserver = new MutationObserver(function () {
+  labelEl.textContent = t('balance')
+  for (var button of sizeBox.querySelectorAll('button')) {
+    button.title = t(button.dataset.lunaLabel)
+    button.setAttribute('aria-label', button.title)
+  }
+  express()
+  render()
 })
+localeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] })
 
 var rect0 = root.getBoundingClientRect()
 state.left = rect0.left
@@ -411,6 +498,7 @@ render()
 fetch(SIZE_URL, { cache: 'no-store' })
   .then(function (r) { return r.json() })
   .then(function (d) {
+    if (disposed) return
     if (d && typeof d.scale === 'number' && d.scale >= MIN_SCALE - 0.1 && d.scale <= MAX_SCALE + 0.1) {
       state.scale = d.scale
       root.style.setProperty('--dshw-scale', String(d.scale))
@@ -419,7 +507,23 @@ fetch(SIZE_URL, { cache: 'no-store' })
     refresh(false)
   })
   .catch(function () { refresh(false) })
-setInterval(function () { refresh(false) }, REFRESH_MS)
+var refreshTimer = setInterval(function () { refresh(false) }, REFRESH_MS)
+window.__dshWhaleWidgetDispose = function () {
+  disposed = true
+  if (activeAbort) activeAbort.abort()
+  if (settleTimer) clearTimeout(settleTimer)
+  if (animId) cancelAnimationFrame(animId)
+  clearInterval(refreshTimer)
+  window.removeEventListener('resize', onResize)
+  document.removeEventListener('pointermove', onControlsPointerMove)
+  document.removeEventListener('pointerleave', hideControls)
+  window.removeEventListener('blur', hideControls)
+  localeObserver.disconnect()
+  root.remove()
+  styleEl.remove()
+  window.__dshWhaleWidget = false
+  delete window.__dshWhaleWidgetDispose
+}
 })()`
 
 /**

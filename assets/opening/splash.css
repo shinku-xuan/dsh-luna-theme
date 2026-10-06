@@ -1,0 +1,204 @@
+/* Camera depth and final composition follow the supplied 1920 × 1080 title reference. */
+@property --luna-camera-progress {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 1;
+}
+.luna-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  isolation: isolate;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  font-family: inherit;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: no-drag;
+  cursor: pointer;
+  outline: none;
+  opacity: 1;
+  transition: opacity 480ms ease;
+}
+.luna-splash [hidden] { display: none; }
+.luna-splash[data-phase="closing"] { opacity: 0; }
+.luna-splash-scene, .luna-splash-blackout { position: absolute; inset: 0; }
+.luna-splash-scene { overflow: hidden; isolation: isolate; }
+.luna-splash-stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100vw, 177.778vh);
+  aspect-ratio: 16 / 9;
+  transform: translate(-50%, -50%);
+  overflow: hidden;
+  isolation: isolate;
+  background: #d8d4eb;
+}
+.luna-splash-plane {
+  position: absolute;
+  inset: 0;
+  transform: scale(calc(1 + var(--luna-camera-progress) * var(--luna-depth)));
+}
+.luna-splash-background-plane {
+  z-index: 0;
+  --luna-depth: .55;
+  transform-origin: 50% 50%;
+}
+.luna-splash-background {
+  position: absolute;
+  left: -1.556%;
+  top: -21.063%;
+  width: 102.813%;
+  height: auto;
+  transform: rotate(4.05deg);
+  transform-origin: 0 0;
+}
+.luna-splash-character { position: absolute; height: auto; opacity: 1; }
+.luna-splash-ursule {
+  z-index: 1;
+  --luna-depth: 1.04;
+  transform-origin: 47.1% 51.2%;
+}
+.luna-splash-ursule img { left: 40.938%; top: 37.037%; width: 28.589%; }
+.luna-splash-mizuho {
+  z-index: 2;
+  --luna-depth: 1.61;
+  transform-origin: 43.7% 50.8%;
+}
+.luna-splash-mizuho img { left: 49.635%; top: 29.907%; width: 37.512%; }
+.luna-splash-hero {
+  z-index: 3;
+  --luna-depth: 2.34;
+  transform-origin: 52.14% 44%;
+}
+.luna-splash-hero img { left: -1.458%; top: -1.852%; width: 70.61%; }
+.luna-splash-minato {
+  z-index: 4;
+  --luna-depth: 1.495;
+  transform-origin: 35.6% 40.6%;
+}
+.luna-splash-minato img { left: 60.104%; top: 12.778%; width: 40.006%; }
+.luna-splash-petals {
+  z-index: 5;
+  --luna-depth: 1.7;
+  transform-origin: 55% 45%;
+  pointer-events: none;
+}
+.luna-splash-petal {
+  position: absolute;
+  display: block;
+  background-image: url('./title-petals.png');
+  background-repeat: no-repeat;
+  filter: brightness(0) invert(1);
+  opacity: .85;
+}
+.luna-splash-petal-atlas { display: none; }
+.luna-splash-logo {
+  position: absolute;
+  z-index: 6;
+  left: 26.719%;
+  top: -6.593%;
+  width: 53.333%;
+  aspect-ratio: 2 / 1;
+}
+.luna-splash-logo img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  mask-image: linear-gradient(115deg, #000 0 30%, transparent 30% 30.6%, #000 30.6% 31.2%, transparent 31.2% 31.8%, #000 31.8% 32.4%, transparent 32.4% 33%, #000 33% 33.6%, transparent 33.6% 34.2%, #000 34.2% 34.8%, transparent 34.8% 100%);
+  mask-size: 500% 100%;
+  mask-position: 50% 0;
+  mask-repeat: no-repeat;
+}
+.luna-splash-wash {
+  position: absolute;
+  z-index: 7;
+  inset: 0;
+  background: #fff;
+}
+.luna-splash[data-theme="dark"] .luna-splash-wash { background: #080b12; }
+.luna-splash-blackout {
+  z-index: 1;
+  background: #000;
+  opacity: 1;
+  transition: opacity var(--luna-blackout-ms, 1400ms) ease-in-out;
+}
+.luna-splash[data-phase="scene"] .luna-splash-blackout { opacity: 0; transition: none; }
+.luna-splash.is-playing .luna-splash-stage { animation: luna-camera-pullback 4500ms linear both; }
+.luna-splash.is-playing .luna-splash-wash { animation: luna-scene-wash 1100ms linear both; }
+.luna-splash.is-playing .luna-splash-logo-bg { animation: luna-logo-reveal 1200ms linear 4100ms both; }
+.luna-splash.is-playing .luna-splash-logo-top { animation: luna-logo-reveal 1200ms linear 4550ms both; }
+.luna-splash.is-playing .luna-splash-logo-bottom { animation: luna-logo-reveal 1500ms linear 5250ms both; }
+.luna-splash.is-playing .luna-splash-petal {
+  animation: luna-petal-drift var(--luna-petal-duration) ease-in-out var(--luna-petal-delay) infinite alternate;
+}
+.luna-splash-prompt {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 18px;
+  padding: 32px;
+  text-align: center;
+}
+.luna-splash-status { font-size: var(--dsw-font-size-base, 13px); line-height: 1.6; color: #e4dde5; }
+.luna-splash-action {
+  font: inherit;
+  font-size: var(--dsw-font-size-base, 13px);
+  font-weight: 400;
+  line-height: 20px;
+  padding: 6px 16px;
+  border: 1px solid rgb(255 255 255 / 30%);
+  border-radius: var(--dsw-alias-radius-md, 8px);
+  background: rgb(0 0 0 / 45%);
+  color: #fff;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.luna-splash-action:hover { background: rgb(255 255 255 / 16%); }
+.luna-splash-action:focus-visible { outline: 2px solid #edd3e1; outline-offset: 4px; }
+@keyframes luna-camera-pullback {
+  0% { --luna-camera-progress: 1; }
+  4.444% { --luna-camera-progress: .88; }
+  6.667% { --luna-camera-progress: .79; }
+  8.889% { --luna-camera-progress: .75; }
+  17.778% { --luna-camera-progress: .566; }
+  26.667% { --luna-camera-progress: .43; }
+  35.556% { --luna-camera-progress: .326; }
+  44.444% { --luna-camera-progress: .234; }
+  55.556% { --luna-camera-progress: .147; }
+  66.667% { --luna-camera-progress: .081; }
+  77.778% { --luna-camera-progress: .037; }
+  88.889% { --luna-camera-progress: .0094; }
+  94.444% { --luna-camera-progress: .0012; }
+  100% { --luna-camera-progress: 0; }
+}
+@keyframes luna-scene-wash {
+  0%, 10% { opacity: 1; }
+  30% { opacity: .7; }
+  55% { opacity: .3; }
+  80% { opacity: .06; }
+  100% { opacity: 0; }
+}
+@keyframes luna-logo-reveal {
+  from { mask-position: 50% 0; }
+  to { mask-position: 0 0; }
+}
+@keyframes luna-petal-drift {
+  from { transform: translate(-16%, -22%) rotate(-8deg); }
+  to { transform: translate(18%, 28%) rotate(9deg); }
+}
+.luna-splash-reduced.is-playing .luna-splash-stage { animation: none; --luna-camera-progress: 0; }
+.luna-splash-reduced .luna-splash-plane { transform: none; }
+.luna-splash-reduced.is-playing .luna-splash-logo img { animation: none; mask-image: none; }
+.luna-splash-reduced .luna-splash-wash { display: none; }
+.luna-splash-reduced.is-playing .luna-splash-petal { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .luna-splash { transition: none; }
+}

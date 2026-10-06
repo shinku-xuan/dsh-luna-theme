@@ -2,22 +2,11 @@
  * Luna restyle for the DSH client: a palette-and-material layer borrowed from
  * Luna-Chat's front end.
  *
- * The restyle is presentation only. Three channels, each retracted when the
- * plugin is disabled:
- *   1. `ctx.theme.overrideTokens` stacks a `--dsw-*` token layer over whatever
- *      theme is active, so the palette follows the user's light/dark scheme
- *      without registering a theme or writing their preference.
- *   2. One stylesheet carries the effects a token cannot express — the
- *      wallpaper layer, markdown decoration, and the native selection colour.
- *   3. A `<script>` tag for the balance widget's page script, served by the
- *      Host row `luna-balance-widget` (`widget.js`). This one is a feature
- *      rather than a repaint, and it is the only reason this bundle needs the
- *      document at all beyond its own sheets.
- *
- * Geometry (padding, margin, sizes) is deliberately untouched: this plugin
- * repaints the shipped layout, it does not re-lay-out it. The one exception is
- * `hr`, whose 1px hairline is what makes the sakura gradient legible where the
- * shipped 0.5px line is not.
+ * Its token layer follows the active light/dark preference. The owned
+ * stylesheet and background layer add color transitions, a slowly moving
+ * wallpaper and sparse petals behind the application. Effects retract their
+ * DOM, listeners and timers when the plugin is disabled. The optional balance
+ * widget, desktop pet and opening load through their own Host rows.
  */
 window.__ModuleLoader__.load({
   id: 'dsh-luna-theme',
@@ -54,6 +43,9 @@ window.__ModuleLoader__.load({
      * loads nothing.
      */
     const PET_SCRIPT_URL = '/dsh-luna-pet/pet.js'
+
+    /** Opening loader served only while the optional luna-opening row is active. */
+    const OPENING_SCRIPT_URL = '/dsh-luna-opening/client.js'
 
     /**
      * Route serving the cheap system-memory reading the badge polls.
@@ -370,6 +362,25 @@ window.__ModuleLoader__.load({
       },
     }
 
+    /** Inherited color properties interpolate without replacing component transitions. */
+    const THEME_COLOR_PROPERTIES = [
+      ...Object.entries(LUNA_TOKENS)
+        .filter(([, modes]) => /^(#|rgba?\(|color-mix\()/.test(modes.light))
+        .map(([name]) => name),
+      '--luna-scrim', '--luna-sakura', '--luna-sakura-soft', '--luna-sakura-plate',
+      '--luna-selection', '--luna-sub-plate', '--luna-sub-plate-hover',
+      '--luna-sub-plate-strong', '--luna-sub-edge', '--luna-sub-edge-hover',
+      '--luna-sub-ink', '--luna-sub-ink-hover',
+    ]
+    const THEME_COLOR_CSS = THEME_COLOR_PROPERTIES.map(name =>
+      '@property ' + name + ' { syntax: "<color>"; inherits: true; initial-value: transparent; }',
+    ).join('\n')
+
+    /** Electron samples these colors once per palette mutation, before CSS transitions finish. */
+    const THEME_FADE_PROPERTIES = THEME_COLOR_PROPERTIES.filter(name =>
+      name !== '--dsw-specific-sidebar-fill' && name !== '--dsw-alias-label-primary',
+    )
+
     /**
      * The settings panel's background, inlined as a data URI.
      *
@@ -402,11 +413,9 @@ window.__ModuleLoader__.load({
      * a contract.
      */
     const LUNA_CSS = `
-/* Wallpaper. The image is an inline data URI carrying its own blur, so the
-   layer has no network dependency, no origin to resolve against, and needs no
-   CSS filter (a filter would create its own containing block and stacking
-   context). It rides the body's own background, which is behind every surface
-   by construction — no negative z-index and no pseudo-element involved. */
+${THEME_COLOR_CSS}
+/* The body's static wallpaper also backs the interval before the ambient
+   layer mounts. Both use the same inline image and readability scrim. */
 html body {
   --luna-wallpaper-image: url('${WALLPAPER_DATA_URI}');
   --luna-settings-image: url('${SETTINGS_DATA_URI}');
@@ -421,6 +430,67 @@ html body {
 html body[data-ds-dark-theme] {
   --luna-scrim: rgba(15, 12, 32, 0.51);
   background-color: #1a1a2e;
+}
+
+body[data-luna-motion-ready] {
+  transition-property: ${THEME_FADE_PROPERTIES.join(', ')}, background-color;
+  transition-duration: var(--luna-theme-fade-duration, 450ms);
+  transition-timing-function: ease-in-out;
+}
+
+/* This layer is below the application and its text, with no input hit area.
+   Transforms stay on the artwork rather than a fixed-overlay ancestor. */
+[data-luna-ambient] {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+body:has(> [data-luna-ambient]) > #root {
+  position: relative;
+  z-index: 1;
+}
+[data-luna-wallpaper] {
+  position: absolute;
+  inset: -3%;
+  background-image: linear-gradient(var(--luna-scrim), var(--luna-scrim)), var(--luna-wallpaper-image);
+  background-size: cover;
+  background-position: center;
+  animation: luna-wallpaper-drift var(--luna-wallpaper-duration, 48s) ease-in-out infinite alternate;
+}
+@keyframes luna-wallpaper-drift {
+  from { transform: translate3d(-.7%, -.4%, 0) scale(1); }
+  to { transform: translate3d(.7%, .4%, 0) scale(1.025); }
+}
+[data-luna-petal] {
+  position: absolute;
+  top: -12vh;
+  left: var(--luna-petal-left);
+  width: var(--luna-petal-size);
+  height: calc(var(--luna-petal-size) * 1.4);
+  border-radius: 75% 20% 70% 35%;
+  corner-shape: round;
+  background: var(--luna-sakura);
+  opacity: var(--luna-petal-opacity, .45);
+  animation: luna-petal-fall var(--luna-petal-duration) linear var(--luna-petal-delay) infinite;
+}
+body[data-ds-dark-theme] [data-luna-petal] {
+  --luna-petal-opacity: .32;
+}
+@keyframes luna-petal-fall {
+  0% { transform: translate3d(0, 0, 0) rotate(20deg); }
+  35% { transform: translate3d(calc(var(--luna-petal-drift) * .4), 42vh, 0) rotate(110deg); }
+  70% { transform: translate3d(calc(var(--luna-petal-drift) * .7), 84vh, 0) rotate(225deg); }
+  100% { transform: translate3d(var(--luna-petal-drift), 124vh, 0) rotate(320deg); }
+}
+[data-luna-ambient][data-paused] :is([data-luna-petal], [data-luna-wallpaper]) {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  body[data-luna-motion-ready] { transition: none; }
+  [data-luna-wallpaper] { animation: none; transform: none; }
+  [data-luna-petal] { display: none; animation: none; }
 }
 
 /* Decoration palette, resolved per scheme. These are plugin-local names; the
@@ -1019,6 +1089,49 @@ div[role='dialog'][class$='_panel']:has(> [class$='_bar']) :is([class$='_percent
       }
     }
 
+    /**
+     * Mount decoration beneath the application and pause it in background tabs.
+     * @returns a disposer for the layer, readiness frame and visibility listener.
+     */
+    const mountAmbient = () => {
+      window.__dshLunaAmbientDispose?.()
+      let active = true
+      const layer = document.createElement('div')
+      layer.setAttribute('data-luna-ambient', '')
+      layer.setAttribute('aria-hidden', 'true')
+      const wallpaper = document.createElement('div')
+      wallpaper.setAttribute('data-luna-wallpaper', '')
+      layer.append(wallpaper)
+      for (let index = 0; index < 18; index += 1) {
+        const petal = document.createElement('span')
+        petal.setAttribute('data-luna-petal', '')
+        petal.style.setProperty('--luna-petal-left', `${(index * 37 + 9) % 100}%`)
+        petal.style.setProperty('--luna-petal-size', `${7 + index % 5}px`)
+        petal.style.setProperty('--luna-petal-duration', `${22 + index % 5 * 3}s`)
+        petal.style.setProperty('--luna-petal-delay', `${-index * 3.7}s`)
+        petal.style.setProperty('--luna-petal-drift', `${index % 2 === 0 ? 7 : -6}vw`)
+        layer.append(petal)
+      }
+      document.body.append(layer)
+      const pause = () => layer.toggleAttribute('data-paused', document.hidden)
+      document.addEventListener('visibilitychange', pause)
+      pause()
+      const frame = window.requestAnimationFrame(() => {
+        document.body.setAttribute('data-luna-motion-ready', '')
+      })
+      const dispose = () => {
+        if (!active) return
+        active = false
+        window.cancelAnimationFrame(frame)
+        document.removeEventListener('visibilitychange', pause)
+        document.body.removeAttribute('data-luna-motion-ready')
+        layer.remove()
+        if (window.__dshLunaAmbientDispose === dispose) delete window.__dshLunaAmbientDispose
+      }
+      window.__dshLunaAmbientDispose = dispose
+      return dispose
+    }
+
     return {
       /**
        * Install the stylesheet immediately, then bind the token layer to the
@@ -1048,6 +1161,8 @@ div[role='dialog'][class$='_panel']:has(> [class$='_bar']) :is([class$='_percent
           return () => tag.remove()
         })
 
+        ctx.effect(() => mountAmbient())
+
         // Load the widget's page script. Idempotent, because the Host's own
         // index hook may have inserted the same tag first in shells that do
         // apply `tapIndex`.
@@ -1058,7 +1173,10 @@ div[role='dialog'][class$='_panel']:has(> [class$='_bar']) :is([class$='_percent
           script.defer = true
           script.dataset.dshWhaleWidget = 'true'
           document.head.append(script)
-          return () => script.remove()
+          return () => {
+            window.__dshWhaleWidgetDispose?.()
+            script.remove()
+          }
         })
 
         // Load the pet's page script, on the same terms as the widget above:
@@ -1073,6 +1191,19 @@ div[role='dialog'][class$='_panel']:has(> [class$='_bar']) :is([class$='_percent
           script.dataset.dshLunaPet = 'true'
           document.head.append(script)
           return () => script.remove()
+        })
+
+        ctx.effect(() => {
+          if (document.querySelector('script[data-dsh-luna-opening]')) return () => {}
+          const script = document.createElement('script')
+          script.src = OPENING_SCRIPT_URL
+          script.defer = true
+          script.dataset.dshLunaOpening = 'true'
+          document.head.append(script)
+          return () => {
+            window.__dshLunaOpeningDispose?.()
+            script.remove()
+          }
         })
 
         // The memory badge lives on the composer's dock row, which React owns

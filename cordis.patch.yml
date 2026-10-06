@@ -1,22 +1,8 @@
-# Three rows, so each optional component can be switched off on its own.
-#
-# Turning one off needs no rebuild: add a patch entry to the profile's own
-# `cordis.patch.yml` that names the row and disables it.
-#
-#   - id: luna-balance-widget
+# Only the root row carries the package's client bundle. Component subpaths
+# can be disabled independently through the profile's cordis.patch.yml:
+#   - id: luna-opening
 #     disabled: true
-#   - id: luna-pet
-#     disabled: true
-#
-# The two component rows name the package SUBPATH, not the package. Two rows
-# naming the package root would register two active client sources for one
-# package, which the client module system rejects as a composition error; a
-# subpath row is not a client row, so only `dsh-luna-theme` carries this
-# package's client half.
-#
-# The dependency runs one way: the page scripts of both components are injected
-# by the theme's client bundle, so disabling `dsh-luna-theme` also removes the
-# balance widget and the pet. Disabling either component leaves the rest alone.
+# Disabling the root theme also removes all component page scripts.
 - insert:
     - id: dsh-luna-theme
       name: dsh-luna-theme
@@ -24,3 +10,5 @@
       name: dsh-luna-theme/widget
     - id: luna-pet
       name: dsh-luna-theme/pet
+    - id: luna-opening
+      name: dsh-luna-theme/opening
