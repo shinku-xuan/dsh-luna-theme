@@ -3,11 +3,13 @@
  * `dsh-luna-theme` bundle.
  *
  * Serves the four `/dsh-whale/*` routes the widget page script talks to (art,
- * balance, size, script) and reads the DeepSeek balance with the profile's
- * `DEEPSEEK_API_KEY`. It is deliberately a row of its own rather than a branch
- * of `index.js`: this module is the only one that needs the `credentials`
- * injection, and its own `disabled` patch entry turns the widget off without
- * touching the theme.
+ * balance, size, script). The balance is read with the profile's
+ * `DEEPSEEK_API_KEY` first; a profile without that key falls back to the signed
+ * in DeepSeek account (`deepseekAccount`), whose recharge and bonus wallets are
+ * summed into the one amount the bubble shows. It is deliberately a row of its
+ * own rather than a branch of `index.js`: this module is the only one that needs
+ * the `credentials` injection, and its own `disabled` patch entry turns the
+ * widget off without touching the theme.
  *
  * The row names the package subpath (`dsh-luna-theme/widget`). A second row
  * naming the package root would register a second active client source for one
@@ -47,6 +49,11 @@ const SIZE_FILE_CANDIDATES = [
 
 const BALANCE_URL = 'https://api.deepseek.com/user/balance'
 const BALANCE_TTL_MS = 25000
+// Host-only stand-in for the page's client version in Platform client headers;
+// the widget's own `/dsh-whale/balance.json` request carries no identity of its own.
+const CLIENT_VERSION = '0.13.0'
+const DEFAULT_LOCALE = 'zh-CN'
+const DEFAULT_TIMEZONE_OFFSET_SECONDS = -8 * 3600
 
 const JSON_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
@@ -66,7 +73,7 @@ var REFRESH_MS = 60000
 var CHANGE_MS = 900
 var ANIM_MS = 700
 var FETCH_TIMEOUT_MS = 25000
-var BALANCE_URL = '/dsh-whale/balance.json'
+var BALANCE_PATH = '/dsh-whale/balance.json'
 var SIZE_URL = '/dsh-whale/size.json'
 var IMG_URL = '/dsh-whale/widget-image.png'
 var HANDLE_WIDTH = 28
@@ -79,6 +86,12 @@ var messages = {
 }
 function t(key) {
   return messages[/^zh/i.test(document.documentElement.lang || navigator.language) ? 'zh' : 'en'][key]
+}
+// The Host derives Platform client headers from these two values before it falls
+// back to the signed-in DeepSeek account, so the request carries them along.
+function balanceUrl() {
+  var lang = document.documentElement.lang || navigator.language || 'zh-CN'
+  return BALANCE_PATH + '?lang=' + encodeURIComponent(lang) + '&tz=' + String(-new Date().getTimezoneOffset() * 60)
 }
 
 var css = [
@@ -331,7 +344,7 @@ function refresh(manual) {
     activeAbort = ctrl
     timer = setTimeout(function () { try { ctrl.abort() } catch (err) {} }, FETCH_TIMEOUT_MS)
   } catch (err) {}
-  fetch(BALANCE_URL, { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
+  fetch(balanceUrl(), { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
     .then(function (r) { return r.json() })
     .then(function (data) {
       if (disposed) return
@@ -555,7 +568,7 @@ export default {
       throw new Error('whale image not found')
     }
 
-    async function fetchBalance() {
+    async function fetchApiKeyBalance() {
       let cred
       try {
         cred = await ctx.credentials.resolve('DEEPSEEK_API_KEY')
@@ -596,6 +609,7 @@ export default {
         }
         return {
           ok: true,
+          source: 'api-key',
           totalBalance: Number(info.total_balance),
           currency: String(info.currency || 'CNY'),
           updatedAt: new Date().toISOString(),
@@ -610,13 +624,115 @@ export default {
       }
     }
 
-    function getBalance() {
+    // Totals one wallet list. A wallet the list does not hold contributes 0 while
+    // an empty list still reports its absence, so a recharge-only or bonus-only
+    // account stays distinguishable from one Platform returned no wallet for.
+    function walletTotal(wallets) {
+      let total = 0
+      let present = false
+      for (const wallet of wallets) {
+        const amount = Number(wallet && wallet.balance)
+        if (Number.isFinite(amount)) total += amount
+        present = true
+      }
+      return { total: total, present: present }
+    }
+
+    // One page balance for wallets of one currency: same-currency recharge and
+    // bonus balances add up, and the first currency present wins otherwise, so a
+    // stray USD bonus cannot be added to a CNY amount.
+    function mergeWallets(details) {
+      const currencies = []
+      for (const wallet of [...details.value, ...details.bonusWallets]) {
+        const currency = String((wallet && wallet.currency) || 'CNY')
+        if (!currencies.includes(currency)) currencies.push(currency)
+      }
+      if (currencies.length === 0) return null
+      const currency = currencies.includes('CNY') ? 'CNY' : currencies[0]
+      const recharge = walletTotal(details.value.filter((wallet) => String((wallet && wallet.currency) || 'CNY') === currency))
+      const bonus = walletTotal(details.bonusWallets.filter((wallet) => String((wallet && wallet.currency) || 'CNY') === currency))
+      return { totalBalance: recharge.total + bonus.total, currency: currency, wallets: recharge.present || bonus.present }
+    }
+
+    // The signed-in account route reads the recharge and bonus wallets Platform
+    // reports and serves their sum, which is what an API-key response reduces to.
+    // Its timezone offset keeps the sign a page reports: negative east of UTC.
+    async function fetchAccountBalance(client) {
+      const account = ctx.get('deepseekAccount')
+      if (!account || typeof account.getBalance !== 'function') {
+        return { ok: false, code: 'NO_ACCOUNT_SERVICE', error: 'DeepSeek 账号服务不可用' }
+      }
+      let details
+      try {
+        details = await account.getBalance(client)
+      } catch (err) {
+        return {
+          ok: false,
+          code: 'ACCOUNT_ERROR',
+          transient: true,
+          error: '账号余额查询失败: ' + String((err && err.message) || err).slice(0, 200),
+        }
+      }
+      if (details === null || details === undefined) {
+        return { ok: false, code: 'ACCOUNT_SIGNED_OUT', error: 'DeepSeek 账号未登录' }
+      }
+      if (details.status !== 'ready') {
+        return { ok: false, code: 'ACCOUNT_BALANCE', error: '账号余额查询失败' }
+      }
+      const merged = mergeWallets(details)
+      if (merged === null) {
+        return { ok: false, code: 'ACCOUNT_EMPTY', error: '账号没有可用钱包' }
+      }
+      if (!merged.wallets) {
+        return { ok: false, code: 'ACCOUNT_EMPTY', error: '账号返回的钱包列表为空' }
+      }
+      return {
+        ok: true,
+        source: 'account',
+        totalBalance: merged.totalBalance,
+        currency: merged.currency,
+        updatedAt: new Date().toISOString(),
+      }
+    }
+
+    // Official balance API first, because a profile holding the key asked for it.
+    // Without one the signed-in account answers instead, so the widget also works
+    // for readers who only ever signed in at platform.deepseek.com. Both routes
+    // failing returns the keyless failure, which is the actionable one.
+    async function fetchBalance(client) {
+      const viaKey = await fetchApiKeyBalance()
+      if (viaKey.ok) return viaKey
+      const viaAccount = await fetchAccountBalance(client)
+      if (viaAccount.ok) return viaAccount
+      if (viaKey.code === 'NO_KEY' && viaAccount.code === 'ACCOUNT_SIGNED_OUT') return viaKey
+      viaAccount.keyError = viaKey.code
+      viaAccount.keyDetail = viaKey.error
+      return viaAccount
+    }
+
+    // Locale and timezone travel with each page request: the Platform client
+    // headers are derived from them, and the page already knows both.
+    function readClient(req) {
+      const query = new URL(String(req?.url || '/'), 'http://localhost').searchParams
+      const lang = query.get('lang') || DEFAULT_LOCALE
+      const rawOffset = query.get('tz')
+      const offset = rawOffset === null ? Number.NaN : Number(rawOffset)
+      return {
+        version: CLIENT_VERSION,
+        locale: /^[a-zA-Z]{2,3}(?:[-_][a-zA-Z0-9]{2,8})*$/.test(lang) ? lang : DEFAULT_LOCALE,
+        timezoneOffsetSeconds: Number.isFinite(offset) && Math.abs(offset) <= 86400
+          ? Math.trunc(offset)
+          : DEFAULT_TIMEZONE_OFFSET_SECONDS,
+      }
+    }
+
+    function getBalance(client) {
       const now = Date.now()
       if (balanceCache && now - balanceCache.at < BALANCE_TTL_MS) {
         return Promise.resolve(balanceCache.payload)
       }
       if (balanceInFlight) return balanceInFlight
-      balanceInFlight = fetchBalance()
+      balanceInFlight = fetchBalance(client)
         .then((payload) => {
           if (payload.ok) {
             balanceCache = { at: now, payload }
@@ -704,11 +820,13 @@ export default {
     }))
 
     disposers.push(ctx.webServer.register({
-      kind: 'exact',
+      // Prefix kind, not exact: the page appends its locale and timezone to the
+      // balance request, and an exact route matcher ignores the query string.
+      kind: 'prefix',
       path: '/dsh-whale/balance.json',
       handler: async (req, res) => {
         try {
-          const payload = await getBalance()
+          const payload = await getBalance(readClient(req))
           res.writeHead(200, JSON_HEADERS)
           res.end(JSON.stringify(payload))
         } catch (err) {
