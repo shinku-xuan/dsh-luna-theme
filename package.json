@@ -1,6 +1,6 @@
 {
   "name": "dsh-luna-theme",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "private": true,
   "description": "Luna theme for DSH, with a balance widget, memory badge, Asahi desktop pet and an optional title opening with voice playback.",
   "license": "MIT",
