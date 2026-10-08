@@ -31,7 +31,7 @@ window.__ModuleLoader__.load({
      * shells to run it. It is added unconditionally: with the widget row disabled
      * the route 404s and the tag loads nothing.
      */
-    const WIDGET_SCRIPT_URL = '/dsh-whale/widget.js'
+    const WIDGET_SCRIPT_URL = 'dsh-whale/widget.js'
 
     /**
      * Page script served by this bundle's pet row (`luna-pet`).
