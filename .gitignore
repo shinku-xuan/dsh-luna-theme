@@ -2,6 +2,8 @@
 node_modules/
 *.tgz
 package-lock.json
+# 插件运行期上报；DSH_PROFILE_DIR 未注入时会落到包目录，也就是本仓库
+*.log
 
 # 编辑器 / 操作系统
 .DS_Store
