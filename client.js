@@ -381,6 +381,34 @@ window.__ModuleLoader__.load({
       name !== '--dsw-specific-sidebar-fill' && name !== '--dsw-alias-label-primary',
     )
 
+    /* shiki.css declares these two as `var(--dsw-alias-*)` on `:root`, but the
+     * palette they alias is written on `body` — and every colour token this
+     * sheet overrides is registered with `@property … initial-value:
+     * transparent` so the palette can interpolate. A custom property's `var()`
+     * is substituted where it is declared, so at the root the alias resolves
+     * against that registered initial value and then inherits downward as
+     * `transparent`. shiki's `pre` carries the alias as its `color`, so every
+     * run shiki paints with the default foreground — brackets, braces,
+     * parentheses, `$variables`, JSON punctuation — landed invisible on the
+     * code plate. Restating both here puts them on the same body layer as the
+     * tokens they alias.
+     *
+     * They stay out of LUNA_TOKENS on purpose: that map is the platform's
+     * `--dsw-*` palette (`verify.mjs` refuses other namespaces there), and
+     * these two are the only shiki aliases the platform resolves at the root.
+     * Restating them also keeps code text out of the palette transition, which
+     * matches `--dsw-alias-label-primary`, already excluded above. */
+    const SHIKI_ALIAS_CSS = `
+html body {
+  --shiki-foreground: ${LUNA_TOKENS['--dsw-alias-label-primary'].light};
+  --shiki-background: ${LUNA_TOKENS['--dsw-alias-markdown-code-block'].light};
+}
+html body[data-ds-dark-theme] {
+  --shiki-foreground: ${LUNA_TOKENS['--dsw-alias-label-primary'].dark};
+  --shiki-background: ${LUNA_TOKENS['--dsw-alias-markdown-code-block'].dark};
+}
+`
+
     /**
      * The settings panel's background, inlined as a data URI.
      *
@@ -414,6 +442,7 @@ window.__ModuleLoader__.load({
      */
     const LUNA_CSS = `
 ${THEME_COLOR_CSS}
+${SHIKI_ALIAS_CSS}
 /* The body's static wallpaper also backs the interval before the ambient
    layer mounts. Both use the same inline image and readability scrim. */
 html body {

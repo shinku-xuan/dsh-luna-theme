@@ -51,7 +51,7 @@ const BALANCE_URL = 'https://api.deepseek.com/user/balance'
 const BALANCE_TTL_MS = 25000
 // Host-only stand-in for the page's client version in Platform client headers;
 // the widget's own `/dsh-whale/balance.json` request carries no identity of its own.
-const CLIENT_VERSION = '0.14.1'
+const CLIENT_VERSION = '0.14.2'
 const DEFAULT_LOCALE = 'zh-CN'
 const DEFAULT_TIMEZONE_OFFSET_SECONDS = -8 * 3600
 
@@ -82,8 +82,8 @@ var disposed = false
 var activeRequests = new Map()
 
 var messages = {
-  zh: { balance: '可用余额', spending: '本日已用金额', switch: '切换', showBalance: '显示可用余额', showSpending: '显示本日已用金额', offPeak: 'DeepSeek 空闲时段', peak: 'DeepSeek 高峰时段', periodUnknown: 'DeepSeek 时段待确认', signIn: '登录账号查看用量', stale: '更新失败 · 点击重试', smaller: '缩小', larger: '放大', collapse: '收起余额挂件', expand: '展开余额挂件', loading: '加载中…', retry: '获取失败 · 点击重试', keyRejected: '密钥无效 · 点击重试', timeout: '请求超时 · 点击重试' },
-  en: { balance: 'Available balance', spending: "Today's spending", switch: 'Switch', showBalance: 'Show available balance', showSpending: "Show today's spending", offPeak: 'DeepSeek off-peak', peak: 'DeepSeek peak hours', periodUnknown: 'DeepSeek hours unconfirmed', signIn: 'Sign in to view usage', stale: 'Update failed · Retry', smaller: 'Zoom out', larger: 'Zoom in', collapse: 'Collapse balance widget', expand: 'Expand balance widget', loading: 'Loading…', retry: 'Failed · Click to retry', keyRejected: 'Invalid key · Retry', timeout: 'Timed out · Retry' }
+  zh: { balance: '可用余额', spending: '本日已用金额', switch: '切换', showBalance: '显示可用余额', showSpending: '显示本日已用金额', offPeak: '空闲时段', peak: '高峰时段', periodUnknown: '时段待确认', signIn: '登录账号查看用量', stale: '更新失败 · 点击重试', smaller: '缩小', larger: '放大', collapse: '收起余额挂件', expand: '展开余额挂件', retry: '获取失败 · 点击重试', keyRejected: '密钥无效 · 点击重试', timeout: '请求超时 · 点击重试' },
+  en: { balance: 'Available balance', spending: "Today's spending", switch: 'Switch', showBalance: 'Show available balance', showSpending: "Show today's spending", offPeak: 'Off-peak', peak: 'Peak hours', periodUnknown: 'Hours unconfirmed', signIn: 'Sign in to view usage', stale: 'Update failed · Retry', smaller: 'Zoom out', larger: 'Zoom in', collapse: 'Collapse balance widget', expand: 'Expand balance widget', retry: 'Failed · Click to retry', keyRejected: 'Invalid key · Retry', timeout: 'Timed out · Retry' }
 }
 function t(key) {
   return messages[/^zh/i.test(document.documentElement.lang || navigator.language) ? 'zh' : 'en'][key]
@@ -304,8 +304,11 @@ function render() {
   switchBtn.setAttribute('aria-label', switchBtn.title)
   var amount, hint
   if (reading.status === 'loading') {
+    // A refresh in flight keeps the last value on screen and says nothing:
+    // the widget already dropped the "click to refresh" hint, and a "loading"
+    // line flickering under the amount on every click reads as noise.
     amount = shown !== null ? fmt(shown, reading.currency) : '…'
-    hint = t('loading')
+    hint = ''
   } else if (reading.status === 'error' || reading.status === 'signIn') {
     amount = shown !== null ? fmt(shown, reading.currency) : '--'
     hint = t(reading.status === 'signIn' ? 'signIn' : shown !== null ? 'stale' : reading.errorHint || 'retry')
