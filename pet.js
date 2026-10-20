@@ -22,6 +22,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createPetAnimationPlayer, createPetFetch } from './pet-live2d.js'
+import { loadPetAnimationAssets, findPetArtOverrides } from './pet-animation-assets.js'
 
 /** Directory holding this module and the `assets/` directory beside it. */
 const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url))
@@ -196,9 +198,37 @@ const PET_JS = `(function () {
 if (window.__dshLunaPet) return
 window.__dshLunaPet = true
 
+var petDisposed = false
+var petEvents = new AbortController()
+var petTimers = new Set()
+var petIntervals = new Set()
+var createPetFetch = ${createPetFetch.toString()}
+var petFetch = createPetFetch(petEvents.signal)
+function petListen(target, name, handler, options) {
+  target.addEventListener(name, handler, Object.assign({}, typeof options === 'boolean' ? { capture: options } : options, { signal: petEvents.signal }))
+}
+function petTimeout(fn, delay) {
+  if (petDisposed) return null
+  var id = setTimeout(function () { petTimers.delete(id); if (!petDisposed) fn() }, delay)
+  petTimers.add(id)
+  return id
+}
+function petClearTimeout(id) { clearTimeout(id); petTimers.delete(id) }
+function petInterval(fn, delay) {
+  if (petDisposed) return null
+  var id = setInterval(fn, delay)
+  petIntervals.add(id)
+  return id
+}
+function petClearInterval(id) { clearInterval(id); petIntervals.delete(id) }
+
+
 var SCRIPT_URL = '/dsh-luna-pet/pet.js'
 var IMAGE_URL = '/dsh-luna-pet/pet-image.png'
 var STATE_URL = '/dsh-luna-pet/state.json'
+var LIVE2D_MANIFEST_URL = '/dsh-luna-pet/live2d.json'
+var LIVE2D_IMAGE_URL = '/dsh-luna-pet/live2d-image.webp'
+var createPetAnimationPlayer = ${createPetAnimationPlayer.toString()}
 var CHAT_URL = '/dsh-luna-pet/chat'
 var CHAT_MODELS_URL = '/dsh-luna-pet/chat-models.json'
 // Kept in step with the floating input's own width so the edge nudge is right on
@@ -340,6 +370,9 @@ var css = [
   '.dshlp-wob{position:absolute;inset:0;transform-origin:50% 100%;pointer-events:none}',
   '.dshlp-img{position:absolute;bottom:0;left:50%;height:100%;width:auto;transform:translateX(-50%);pointer-events:auto;cursor:grab;touch-action:none;-webkit-user-drag:none;user-select:none;filter:drop-shadow(0 3px 5px rgba(40,32,64,.22))}',
   '.dshlp-motion{position:absolute;bottom:0;left:50%;height:100%;width:calc(var(--dshlp-h) * var(--dshlp-scale) * .777777778);transform:translateX(-50%);transform-origin:50% 100%;pointer-events:none;background-size:400% 200%;background-repeat:no-repeat;display:none;filter:drop-shadow(0 3px 5px rgba(40,32,64,.22))}',
+  '.dshlp-live2d{position:absolute;left:50%;transform:translateX(-50%);pointer-events:auto;cursor:grab;touch-action:none;display:none;filter:drop-shadow(0 3px 5px rgba(40,32,64,.22))}',
+  '.dshlp-root.dshlp-dragging .dshlp-live2d{cursor:grabbing}',
+  '.dshlp-root.dshlp-sleeping .dshlp-live2d{cursor:default}',
   '.dshlp-root.dshlp-dragging .dshlp-img{cursor:grabbing}',
   '.dshlp-root.dshlp-sleeping .dshlp-img{cursor:default}',
   // The bubble and the menu wear the theme's SECOND control tier rather than a
@@ -433,6 +466,11 @@ wob.appendChild(img)
 var motion = document.createElement('div')
 motion.className = 'dshlp-motion'
 wob.appendChild(motion)
+var liveCanvas = document.createElement('canvas')
+liveCanvas.className = 'dshlp-live2d'
+liveCanvas.setAttribute('aria-label', '小仓朝日')
+wob.appendChild(liveCanvas)
+var liveAnimation = createPetAnimationPlayer({ canvas: liveCanvas, manifestUrl: LIVE2D_MANIFEST_URL, imageUrl: LIVE2D_IMAGE_URL, outlineTargets: [liveCanvas, img, motion] })
 flip.appendChild(wob)
 root.appendChild(flip)
 
@@ -547,8 +585,8 @@ function say(text, alert, ms) {
   bubble.textContent = text
   bubble.classList.toggle('dshlp-alert', !!alert)
   bubble.classList.add('dshlp-on')
-  if (bubbleTimer) clearTimeout(bubbleTimer)
-  bubbleTimer = setTimeout(function () {
+  if (bubbleTimer) petClearTimeout(bubbleTimer)
+  bubbleTimer = petTimeout(function () {
     bubbleTimer = null
     bubble.classList.remove('dshlp-on')
     bubble.classList.remove('dshlp-wide')
@@ -629,6 +667,8 @@ function endWalk() {
 }
 
 function stepWalk(dt) {
+  // Retained frames may still show another action while the walking page loads.
+  if (moodArt() !== 'walk-a' || !walkingArtVisible()) return
   if (state.targetX === null) { endWalk(); return }
   var dx = state.targetX - state.x
   if (Math.abs(dx) < 1.2) { endWalk(); return }
@@ -651,8 +691,18 @@ function stepWalk(dt) {
   // it three times as fast. Its steps are measured at the roaming pace instead,
   // which leaves the legs at their own tempo while the pet still hurries home.
   var stepped = Math.abs(state.x - previousX) * (state.rushing ? WALK_SPEED / HOME_SPEED : 1)
-  walkPhase = (walkPhase + stepped / (WALK_STRIDE_PX * state.scale)) % 1
+  var stride = liveAnimation.hasPose('walk-a') ? liveAnimation.strideFor(DEFAULT_HEIGHT) : WALK_STRIDE_PX
+  walkPhase = (walkPhase + stepped / (stride * state.scale)) % 1
   if (state.x === state.targetX || state.x <= minX() || state.x >= maxX()) endWalk()
+}
+
+/** Whether the visible artwork is a walking pose, including legacy fallback. */
+function walkingArtVisible() {
+  if (root.style.display === 'none') return false
+  if (root.dataset.artRenderer === 'live2d-frames') {
+    return liveCanvas.dataset.pose === 'walk-a-left' || liveCanvas.dataset.pose === 'walk-a-right'
+  }
+  return shownArt === 'walk-a'
 }
 
 function stepPhysics(dt) {
@@ -699,10 +749,8 @@ function frame(now) {
     if (Math.abs(state.y - wantY) > 0.5) state.y += (wantY - state.y) * Math.min(1, dt * 6)
     else state.y = wantY
     state.x = clamp(state.x, minX(), maxX())
-    // Roaming is suspended while DSH is busy, while the pet is asleep, and
-    // while the user has asked it to stay put: it stands and watches instead of
-    // wandering off mid-task or against that instruction.
-    if (!state.sleeping && !state.anchored && !isBusy() && now >= state.nextRoamAt) {
+    // New walks start only from idle artwork, after reactions and task moods.
+    if (!state.anchored && moodArt() === IDLE_ART && now >= state.nextRoamAt) {
       planWalk()
       state.nextRoamAt = now + rand(ROAM_MIN_MS, ROAM_MAX_MS)
     }
@@ -792,7 +840,6 @@ function moodArt() {
   // state: the character asked the question here, not in the conversation.
   if (chatBusy) return 'thinking'
   if (state.sleeping) return 'sleep'
-  if (state.mode === 'walk') return 'walk-a'
   if (state.working === 'thinking') return 'thinking'
   if (state.working === 'waiting') return 'waiting'
   if (state.working === 'success') return 'happy'
@@ -800,6 +847,7 @@ function moodArt() {
   // The result state is a tool result landing on its way back to the model:
   // the pet is still on the job, and there is no pose of its own for it.
   if (state.working === 'working' || state.working === 'result') return 'working'
+  if (state.mode === 'walk') return 'walk-a'
   return IDLE_ART
 }
 
@@ -855,6 +903,19 @@ function motionFrame(spec, now) {
 
 function applyArt() {
   var want = moodArt()
+  var at = performance.now()
+  var trigger = state.pose && state.pose.id === want && at < state.pose.until ? state.pose.at : null
+  if (liveAnimation.render({ pose: want, now: at, walkPhase: walkPhase, facing: state.facing, trigger: trigger })) {
+    root.style.display = ''
+    root.dataset.artRenderer = 'live2d-frames'
+    motion.style.display = 'none'
+    img.style.opacity = '0'
+    flip.style.transform = 'scaleX(1)'
+    wob.style.transform = 'rotate(' + (state.mode === 'fall' ? state.vx * 0.006 : 0).toFixed(2) + 'deg)'
+    return
+  }
+  root.dataset.artRenderer = 'legacy'
+  liveCanvas.style.display = 'none'
   // A pose this install does not carry falls back to the default one, and a
   // missing default means there is no artwork at all: the pet then leaves the
   // shell untouched rather than parking a broken image over the UI.
@@ -893,7 +954,7 @@ function applyArt() {
   }
 }
 
-img.addEventListener('error', function () {
+petListen(img, 'error', function () {
   if (shownArt) { artFailed[shownArt] = true; artReady[shownArt] = false }
   shownArt = null
   applyArt()
@@ -1036,7 +1097,7 @@ function applyStatus(next) {
   if (!texts) return
   say(pick(texts), next === 'waiting')
   if (next === 'success' || next === 'error') {
-    setTimeout(function () {
+    petTimeout(function () {
       if (state.working === next) state.working = null
     }, next === 'success' ? 4000 : 6000)
   }
@@ -1047,9 +1108,9 @@ function poll() {
   var timer = null
   try {
     ctrl = new AbortController()
-    timer = setTimeout(function () { try { ctrl.abort() } catch (err) {} }, FETCH_TIMEOUT_MS)
+    timer = petTimeout(function () { try { ctrl.abort() } catch (err) {} }, FETCH_TIMEOUT_MS)
   } catch (err) {}
-  fetch(STATE_URL, { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
+  petFetch(STATE_URL, { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
     .then(function (r) { return r.ok ? r.json() : null })
     .then(function (data) {
       pingMiss = 0
@@ -1063,14 +1124,14 @@ function poll() {
       // pet still appears if the row is enabled later.
       pingMiss += 1
       if (pingMiss === 5 && pollTimer) {
-        clearInterval(pollTimer)
-        pollTimer = setInterval(poll, 15000)
+        petClearInterval(pollTimer)
+        pollTimer = petInterval(poll, 15000)
       } else if (pingMiss > 40 && pollTimer) {
-        clearInterval(pollTimer)
+        petClearInterval(pollTimer)
         pollTimer = null
       }
     })
-    .finally(function () { if (timer) clearTimeout(timer) })
+    .finally(function () { if (timer) petClearTimeout(timer) })
 }
 
 // ---------------------------------------------------------------------------
@@ -1139,7 +1200,7 @@ function buildMenu() {
     var b = document.createElement('button')
     b.type = 'button'
     b.textContent = label
-    b.addEventListener('click', function (e) {
+    petListen(b, 'click', function (e) {
       e.stopPropagation()
       fn(b)
       if (!keepOpen) closeMenu()
@@ -1283,7 +1344,7 @@ function chatParse(text, onEvent) {
 
 /** Rebuild the model pullout from the host, keeping the remembered choice when it still exists. */
 function chatLoadModels() {
-  return fetch(CHAT_MODELS_URL, { credentials: 'same-origin' }).then(function (res) {
+  return petFetch(CHAT_MODELS_URL, { credentials: 'same-origin' }).then(function (res) {
     if (!res.ok) throw new Error('HTTP ' + res.status)
     return res.json()
   }).then(function (data) {
@@ -1328,7 +1389,7 @@ function modelButton(item, key) {
   button.type = 'button'
   button.dataset.model = key
   button.textContent = item.name || item.id
-  button.addEventListener('click', function (e) {
+  petListen(button, 'click', function (e) {
     e.stopPropagation()
     chatModelKey = key
     markPicked()
@@ -1415,7 +1476,7 @@ function sendChat() {
   }
 
   chatAbort = ('AbortController' in window) ? new AbortController() : null
-  fetch(CHAT_URL, {
+  petFetch(CHAT_URL, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
@@ -1502,7 +1563,7 @@ function toggleModels(row) {
   modelMenu.classList.toggle('dshlp-flip', menu.getBoundingClientRect().right + modelMenu.offsetWidth + 6 > viewport().w)
 }
 
-sayInput.addEventListener('keydown', function (e) {
+petListen(sayInput, 'keydown', function (e) {
   e.stopPropagation()
   if (e.key === 'Enter') {
     e.preventDefault()
@@ -1514,8 +1575,8 @@ sayInput.addEventListener('keydown', function (e) {
 })
 // The pet's own drag and menu handlers listen on the root, so interaction with
 // the input must not reach them.
-sayInput.addEventListener('pointerdown', function (e) { e.stopPropagation() })
-sayInput.addEventListener('contextmenu', function (e) {
+petListen(sayInput, 'pointerdown', function (e) { e.stopPropagation() })
+petListen(sayInput, 'contextmenu', function (e) {
   e.preventDefault()
   e.stopPropagation()
 })
@@ -1523,35 +1584,35 @@ sayInput.addEventListener('contextmenu', function (e) {
 // twice. Two places are exempt: the input itself, and the menu — the menu owns
 // the row that toggles it, and closing here would make that row reopen the
 // input on the same gesture instead of closing it.
-document.addEventListener('pointerdown', function (e) {
+petListen(document, 'pointerdown', function (e) {
   if (!sayOpen) return
   if (menu.contains(e.target) || sayInput.contains(e.target)) return
   closeSay()
 }, true)
 
 
-root.addEventListener('pointerdown', onDown)
-root.addEventListener('pointermove', onMove)
-root.addEventListener('pointerup', onUp)
-root.addEventListener('pointercancel', onUp)
-root.addEventListener('contextmenu', function (e) {
+petListen(root, 'pointerdown', onDown)
+petListen(root, 'pointermove', onMove)
+petListen(root, 'pointerup', onUp)
+petListen(root, 'pointercancel', onUp)
+petListen(root, 'contextmenu', function (e) {
   e.preventDefault()
   e.stopPropagation()
   if (menuOpen) closeMenu(); else openMenu()
 })
-document.addEventListener('pointerdown', function (e) {
+petListen(document, 'pointerdown', function (e) {
   if (menuOpen && !root.contains(e.target)) closeMenu()
 }, true)
-document.addEventListener('visibilitychange', function () {
+petListen(document, 'visibilitychange', function () {
   state.hidden = !!document.hidden
   if (!state.hidden) lastFrame = 0
 })
-window.addEventListener('resize', function () {
+petListen(window, 'resize', function () {
   state.x = clamp(state.x, minX(), maxX())
   state.y = groundTop()
 })
-window.addEventListener('pointerdown', onActivity, true)
-window.addEventListener('keydown', onActivity, true)
+petListen(window, 'pointerdown', onActivity, true)
+petListen(window, 'keydown', onActivity, true)
 
 // ---------------------------------------------------------------------------
 // Boot.
@@ -1581,30 +1642,35 @@ shownArt = IDLE_ART
 artReady[IDLE_ART] = true
 img.src = artSrc(IDLE_ART)
 preloadArt('walk-a')
-preloadArt('walk-cycle')
-preloadArt('idle-cycle')
 preloadArt('drag')
-preloadArt('drag-cycle')
 preloadArt('fall')
-preloadArt('fall-cycle')
 preloadArt('surprise')
-preloadArt('surprise-cycle')
 preloadArt('wave')
-preloadArt('wave-cycle')
 render(performance.now())
 raf = requestAnimationFrame(frame)
 poll()
-pollTimer = setInterval(poll, POLL_MS)
-setInterval(checkSleep, 5000)
+pollTimer = petInterval(poll, POLL_MS)
+petInterval(checkSleep, 5000)
 
-window.addEventListener('beforeunload', function () {
-  // The conversation is page state and is never written anywhere, so closing the
-  // window already ends it. Dropping it here says so out loud rather than
-  // leaving the answer to be inferred from the absence of any persistence.
-  chatTurns = []
+function disposePet() {
+  if (petDisposed) return
+  petDisposed = true
   if (raf) cancelAnimationFrame(raf)
-  if (pollTimer) clearInterval(pollTimer)
-})
+  petEvents.abort()
+  for (var timer of petTimers) clearTimeout(timer)
+  for (var interval of petIntervals) clearInterval(interval)
+  petTimers.clear()
+  petIntervals.clear()
+  if (chatAbort) chatAbort.abort()
+  chatTurns = []
+  liveAnimation.dispose()
+  root.remove()
+  styleEl.remove()
+  window.__dshLunaPet = false
+  if (window.__dshLunaPetDispose === disposePet) delete window.__dshLunaPetDispose
+}
+window.__dshLunaPetDispose = disposePet
+petListen(window, 'beforeunload', disposePet)
 })()`
 
 /**
@@ -1677,6 +1743,14 @@ export default {
   inject: ['webServer'],
   apply(ctx) {
     const art = new Map()
+    let animation = null
+    try {
+      animation = loadPetAnimationAssets(path.join(PLUGIN_DIR, 'assets', 'pet-live2d'))
+    } catch (error) {
+      console.warn('[luna-pet] Live2D frames unavailable; using existing artwork', error)
+    }
+    const overridden = findPetArtOverrides(ART_IDS.filter(id => !id.endsWith('-cycle')), ART_DIRS.slice(0, -1),
+      path.join(PLUGIN_DIR, 'assets', 'pet-art'), ART_EXTS)
 
     /** Read one artwork file, or null when it is not there. */
     function readArt(file) {
@@ -1752,6 +1826,33 @@ export default {
         } catch (err) {
           res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
           res.end('pet artwork unavailable: ' + String((err && err.message) || err))
+        }
+      },
+    }))
+
+    disposers.push(ctx.webServer.register({
+      kind: 'exact',
+      path: '/dsh-luna-pet/live2d.json',
+      handler: (req, res) => {
+        res.writeHead(animation ? 200 : 404, JSON_HEADERS)
+        res.end(JSON.stringify(animation ? animation.manifestFor(overridden) : { ok: false, reason: 'animation-unavailable' }))
+      },
+    }))
+
+    disposers.push(ctx.webServer.register({
+      kind: 'exact',
+      path: '/dsh-luna-pet/live2d-image.webp',
+      handler: (req, res) => {
+        try {
+          const id = new URL(req.url || '/', 'http://localhost').searchParams.get('id')
+          const bytes = animation && id ? animation.readPage(id) : null
+          if (!bytes) { res.writeHead(404); res.end(); return }
+          res.writeHead(200, { 'Content-Type': 'image/webp', 'Content-Length': String(bytes.length), 'Cache-Control': 'public, max-age=31536000, immutable' })
+          res.end(bytes)
+        } catch (error) {
+          console.warn('[luna-pet] Live2D page unavailable; retaining artwork', error)
+          res.writeHead(404)
+          res.end()
         }
       },
     }))

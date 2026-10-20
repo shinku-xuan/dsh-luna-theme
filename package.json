@@ -1,6 +1,6 @@
 {
   "name": "dsh-luna-theme",
-  "version": "0.14.2",
+  "version": "0.14.7",
   "private": true,
   "description": "Luna theme for DSH, with a balance widget, memory badge, Asahi desktop pet and an optional title opening with voice playback.",
   "license": "MIT",
@@ -31,8 +31,10 @@
     "assets/asahi.webp",
     "assets/pet-art",
     "assets/opening",
-    "preview/opening.html",
-    "persona/asahi-chat.md"
+    "persona/asahi-chat.md",
+    "pet-live2d.js",
+    "pet-animation-assets.js",
+    "assets/pet-live2d"
   ],
   "dsh": {
     "bundle": {

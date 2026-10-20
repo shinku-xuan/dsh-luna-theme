@@ -718,8 +718,11 @@ body [data-shortcut-modal='settings'] button:is(
 /* The readings under the composer — turns/steps, speed, cache hit — plus the
    context ring beside them. They are one row of the same kind of read-only
    diagnostic, so they wear the second-tier plaque too, in capsule form like the
-   badge this style comes from. The ring declares no stable attribute, so it is
+   badge this style comes from. Each reading carries its own 'data-composer-stat'
+   id since 0.2.1; before that one shared 'data-composer-stats' row held both, so
+   both spellings are styled. The ring declares no stable attribute, so it is
    anchored by the two '<circle>'s only it draws inside a 14×14 '<svg>'. */
+[data-composer-stat] [class$='_pill'],
 [data-composer-stats] [class$='_pill'],
 button:has(> svg[viewBox='0 0 14 14'] > circle) {
   padding: 1px 11px;
@@ -730,6 +733,8 @@ button:has(> svg[viewBox='0 0 14 14'] > circle) {
   color: var(--luna-sub-ink);
 }
 
+[data-composer-stat] [class$='_pill']:hover,
+[data-composer-stat] [class$='_pill'][aria-expanded='true'],
 [data-composer-stats] [class$='_pill']:hover,
 [data-composer-stats] [class$='_pill'][aria-expanded='true'],
 button:has(> svg[viewBox='0 0 14 14'] > circle):hover,
@@ -1078,7 +1083,7 @@ div[role='dialog'][class$='_panel']:has(> [class$='_bar']) :is([class$='_percent
       // The dock row is the one holding the composer readings; the context ring
       // is the fallback anchor for a row that renders no readings at all.
       const dock = () => {
-        const stats = document.querySelector('[data-composer-stats]')
+        const stats = document.querySelector('[data-composer-stat], [data-composer-stats]')
         if (stats !== null && stats.parentElement !== null) return stats.parentElement
         const ring = document.querySelector(CONTEXT_RING_SELECTOR)
         return ring?.parentElement?.parentElement ?? null
@@ -1219,7 +1224,10 @@ div[role='dialog'][class$='_panel']:has(> [class$='_bar']) :is([class$='_percent
           script.defer = true
           script.dataset.dshLunaPet = 'true'
           document.head.append(script)
-          return () => script.remove()
+          return () => {
+            window.__dshLunaPetDispose?.()
+            script.remove()
+          }
         })
 
         ctx.effect(() => {

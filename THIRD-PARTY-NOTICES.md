@@ -21,6 +21,7 @@
 | `assets/opening/lun_sp06.wav` | 全黑阶段的开场语音 | 用户提供的游戏音频原样复制 |
 | `assets/asahi.webp` | 桌宠的单图立绘（无姿态图时的回退） | 原样，Q 版立绘 |
 | `assets/pet-art/*.webp`（12 张静态姿态 + 12 张动作图集） | 桌宠的姿态立绘与连续动作 | 原有姿态按 alpha 包围盒统一角色高、水平居中、脚底对齐；动作图集与坠落姿态以现有角色图为参考由 AI 生成，裁切对齐后重新编码 |
+| `assets/pet-live2d/*.webp` | 桌宠的十二种 Live2D 动作，行走含左右方向 | 用户逐一验收的模型经实际 Cubism Core 渲染、按统一动作坐标裁切缩放后编码；制作中包含角色参考图的拆层、局部补画和经用户确认的 AI 底图，原有角色权利声明继续适用；客户端仅分发渲染图集，未分发 Cubism SDK |
 
 - **该游戏素材的全部权利（包括著作权及相关权利）归 Navel 所有。**
 - 本项目**不主张**对上述素材的任何权利，也**与 Navel 无任何隶属、合作或背书关系**。
@@ -31,7 +32,7 @@
   （删除对应文件即可，不影响插件其余功能：删 `assets/wallpaper.webp` 回退为无壁纸，
   删 `assets/luna-settings.webp` 后设置面板回退为原主题底色，
   删 `assets/luna-bot.png` 后头像路由返回 404，白色余额框继续显示，
-  删 `assets/asahi.webp` 与 `assets/pet-art/` 后桌宠不显示；
+  删 `assets/asahi.webp`、`assets/pet-art/` 与 `assets/pet-live2d/` 后桌宠不显示；
   开屏素材缺失时显示重试，可点击画面跳过，或停用 `luna-opening` 组件）。
 
 ## 2. 视觉语言参考
