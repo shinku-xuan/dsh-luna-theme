@@ -13,6 +13,9 @@ export function createPetFetch(owner) {
 /**
  * Play approved Cubism renders from small atlas pages. The current and next
  * pages are decoded on demand; at most three decoded pages stay resident.
+ * Page failures retry after 0.5 and 1 second, then every 30 seconds while needed.
+ * Missing pages pause timed playback; three failures permit artwork fallback.
+ * Prefetch failures never disable a page that is already available.
  * No Cubism SDK or model ticker runs in the pet's client.
  * @param options - canvas, same-origin resource URLs, optional fallback artwork targets and readiness callback.
  * @returns a renderer and an idempotent disposer that aborts loading and closes bitmaps.
@@ -22,7 +25,7 @@ export function createPetAnimationPlayer({ canvas, manifestUrl, imageUrl, onRead
   const releaseOutline = installOutline()
   const resident = new Map()
   const pending = new Map()
-  const failed = new Set()
+  const failures = new Map()
   const warned = new Set()
   const controller = new AbortController()
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -32,6 +35,7 @@ export function createPetAnimationPlayer({ canvas, manifestUrl, imageUrl, onRead
   let activeKey = null
   let activeTrigger = null
   let started = 0
+  let stalledAt = null
   let lastPaint = null
   let hiddenAt = document.hidden ? performance.now() : null
 
@@ -74,10 +78,10 @@ export function createPetAnimationPlayer({ canvas, manifestUrl, imageUrl, onRead
     }
   }
 
-  function report(key, error) {
+  function report(key, error, message = 'Live2D animation unavailable; retaining artwork') {
     if (warned.has(key)) return
     warned.add(key)
-    console.warn('[luna-pet] Live2D animation unavailable; retaining artwork', key, error)
+    console.warn('[luna-pet] ' + message, key, error)
   }
 
   const manifestTimer = setTimeout(() => controller.abort(), 8000)
@@ -116,7 +120,9 @@ export function createPetAnimationPlayer({ canvas, manifestUrl, imageUrl, onRead
   }
 
   function loadPage(id, key) {
-    if (resident.has(id) || pending.has(id) || failed.has(key) || disposed) return
+    if (resident.has(id) || pending.has(id) || disposed) return
+    const failure = failures.get(id)
+    if (failure && performance.now() < failure.retryAt) return
     const abort = new AbortController()
     const item = { abort }
     const timer = setTimeout(() => abort.abort(), 8000)
@@ -130,11 +136,19 @@ export function createPetAnimationPlayer({ canvas, manifestUrl, imageUrl, onRead
       if (disposed || abort.signal.aborted || !desired.has(id)) { bitmap.close(); return }
       if (bitmap.width !== 1600 || bitmap.height !== 1560) { bitmap.close(); throw new Error('Invalid animation page dimensions') }
       resident.set(id, bitmap)
+      if (failures.delete(id)) {
+        warned.delete('page:' + id)
+        warned.delete('cooldown:' + id)
+        console.info('[luna-pet] Live2D animation page recovered', id)
+      }
       trim()
     })().catch(error => {
       if (disposed || item.cancelled || !desired.has(id)) return
-      failed.add(key)
-      report(key, error)
+      const attempts = Math.min(3, (failures.get(id)?.attempts ?? 0) + 1)
+      const delay = attempts === 1 ? 500 : attempts === 2 ? 1000 : 30000
+      failures.set(id, { key, attempts, retryAt: performance.now() + delay })
+      report('page:' + id, error, 'Live2D animation page unavailable; retrying')
+      if (attempts === 3) report('cooldown:' + id, error, 'Live2D animation page unavailable; retrying every 30 seconds while needed')
     }).finally(() => {
       clearTimeout(timer)
       if (pending.get(id) === item) pending.delete(id)
@@ -146,13 +160,14 @@ export function createPetAnimationPlayer({ canvas, manifestUrl, imageUrl, onRead
     if (disposed || !manifest) return false
     const key = pose === 'walk-a' ? 'walk-a-' + (facing < 0 ? 'left' : 'right') : pose
     const action = manifest.actions[key]
-    if (!action || failed.has(key)) { canvas.style.display = 'none'; return false }
+    if (!action) { canvas.style.display = 'none'; return false }
     if (activeKey !== key || activeTrigger !== trigger) {
       activeKey = key
       activeTrigger = trigger
       started = trigger === null ? now : trigger
+      stalledAt = null
     }
-    const elapsed = Math.max(0, now - started)
+    const elapsed = Math.max(0, (stalledAt ?? now) - started)
     let distanceFrame = 0
     if (action.distance) {
       while (distanceFrame + 1 < action.frames && action.distanceSamples[distanceFrame + 1] <= walkPhase) distanceFrame++
@@ -171,9 +186,12 @@ export function createPetAnimationPlayer({ canvas, manifestUrl, imageUrl, onRead
     }
     const bitmap = resident.get(page.id)
     if (!bitmap) {
+      if (stalledAt === null) stalledAt = now
+      if ((failures.get(page.id)?.attempts ?? 0) >= 3) { canvas.style.display = 'none'; return false }
       if (lastPaint) canvas.style.display = 'block'
       return lastPaint !== null
     }
+    if (stalledAt !== null) { started += now - stalledAt; stalledAt = null }
     resident.delete(page.id)
     resident.set(page.id, bitmap)
     if (lastPaint !== key + ':' + frame) {
@@ -191,17 +209,28 @@ export function createPetAnimationPlayer({ canvas, manifestUrl, imageUrl, onRead
 
   function visibility() {
     const now = performance.now()
-    if (document.hidden) hiddenAt = now
-    else if (hiddenAt !== null) { started += now - hiddenAt; hiddenAt = null }
+    if (document.hidden) {
+      hiddenAt = now
+      for (const item of pending.values()) { item.cancelled = true; item.abort.abort() }
+    } else if (hiddenAt !== null) {
+      const duration = now - hiddenAt
+      started += duration
+      if (stalledAt !== null) stalledAt += duration
+      hiddenAt = null
+    }
   }
   document.addEventListener('visibilitychange', visibility)
 
   return {
     ready,
     render,
-    hasPose(pose) { return !!manifest && !!manifest.actions[pose === 'walk-a' ? 'walk-a-right' : pose] && !failed.has(pose) },
+    hasPose(pose) { return !!manifest && !!manifest.actions[pose === 'walk-a' ? 'walk-a-right' : pose] },
     strideFor(height) { return manifest ? manifest.actions['walk-a-right']?.stride * height / manifest.bodyHeight : null },
-    getStats() { return { residentPages: resident.size, pendingPages: pending.size, displayed: lastPaint, failed: [...failed] } },
+    getStats() {
+      return { residentPages: resident.size, pendingPages: pending.size, displayed: lastPaint,
+        failed: [...new Set([...failures.values()].filter(failure => failure.attempts >= 3).map(failure => failure.key))],
+        retryPages: failures.size }
+    },
     dispose() {
       if (disposed) return
       disposed = true
@@ -209,6 +238,7 @@ export function createPetAnimationPlayer({ canvas, manifestUrl, imageUrl, onRead
       clearTimeout(manifestTimer)
       for (const item of pending.values()) item.abort.abort()
       pending.clear()
+      failures.clear()
       for (const bitmap of resident.values()) bitmap.close()
       resident.clear()
       document.removeEventListener('visibilitychange', visibility)
