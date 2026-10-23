@@ -1,0 +1,266 @@
+/*
+ * ① 内核启动页换肤 —— dsh-luna-boot-proto
+ *
+ * 全部由 CSS 完成：背景图、HARNESS 字标、以及三个朝日的加载动画。
+ * 没有一行 JS 参与，所以它在桌面端的**首帧**就是最终样子，不用等客户端 bundle 到达。
+ *
+ * 能依赖的接口只有三个，其余都不稳定：
+ *   [data-dsh-boot]          启动页容器（内核 boot-page.ts 挂的）
+ *   [data-dsh-boot-spinner]  进度环（本文件把它改造成三个朝日的调度容器）
+ *   --dsh-boot-* / --dsw-alias-* 自定义属性
+ * 内核的 class 名是 CSS Module 哈希（.boot / .wordmark / .spinner），不要去选它们。
+ * 字标与提示行改用 :has() 与相邻兄弟选择器定位 —— 两者都只在"正常加载"分支成立，
+ * 失败报告分支没有 [data-dsh-boot-spinner]，因此不会被误选。
+ *
+ * 三条已验证的实现约束：
+ *
+ * 1) 源序劣势，所以抬特异度而不是撒 !important。
+ *    Host 的 index-inject 行被插在 <head> 开头，排在应用自己的样式表之前。
+ *    同特异度下源序靠后者胜，`[data-dsh-boot]` 与内核 `.boot` 同为 (0,1,0)，
+ *    直接写会输。这里一律用双写属性选择器 `[data-dsh-boot][data-dsh-boot]`（(0,2,0)）。
+ *    深色模式要压过内核的 `body[data-ds-dark-theme] .boot`（(0,2,1)），
+ *    所以深色规则写成 `body[data-ds-dark-theme] [data-dsh-boot][data-dsh-boot]`（(0,3,1)）。
+ *
+ * 2) 自定义属性不需要 !important。
+ *    把 --dsw-alias-* 声明在 [data-dsh-boot] 元素上，元素自身的 background/color 会取
+ *    本地声明值 —— 元素上声明的自定义属性必然胜过从 :root 继承来的值。作用域只有
+ *    启动页子树，主界面不受影响。
+ *
+ * 3) 中格动画**绝不能**动 transform。
+ *    ::before 与 ::after 是 [data-dsh-boot-spinner] 的子节点，容器一旦 translateY，
+ *    两个伪元素会跟着一起抬起来 —— 表现就是"左 → 右 → 三个一起"而不是轮流跳。
+ *    所以中格改用 background-position 位移，容器自身的 transform 全程保持 none。
+ */
+
+/* ── 背景：浅色用白天底图，深色用夜景底图，外面各罩一层统一遮罩 ─────────── */
+
+[data-dsh-boot][data-dsh-boot] {
+  position: relative;
+
+  /* 图没到之前先铺一层同色系底色，避免闪白 */
+  background-color: #cfe6f5;
+  background-image: url("./boot-bg-day.webp");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+
+  /* 浅色：一层白纱，压住画面、让深色字标与朝日拿回对比度 */
+  --luna-scrim: rgb(255 255 255 / 34%);
+
+  --dsw-alias-brand-primary: #6b83b8;
+  --dsw-alias-label-primary: #1b2130;
+  --dsw-alias-label-tertiary: #3f4a63;
+  --dsw-alias-border-l2: rgb(27 33 48 / 14%);
+}
+
+/* 遮罩：整屏均匀一层，不再做中心聚光 */
+[data-dsh-boot][data-dsh-boot]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--luna-scrim);
+}
+
+/* 卡片抬到遮罩之上 */
+[data-dsh-boot][data-dsh-boot] > div {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── 深色模式：换夜景底图，遮罩换成深色 ───────────────────────────────── */
+
+body[data-ds-dark-theme] [data-dsh-boot][data-dsh-boot] {
+  background-color: #0b0e16;
+  background-image: url("./boot-bg-night.webp");
+  --luna-scrim: rgb(9 12 20 / 46%);
+
+  --dsw-alias-brand-primary: #a9c4ff;
+  --dsw-alias-label-primary: #eef2ff;
+  --dsw-alias-label-tertiary: #98a3c0;
+  --dsw-alias-border-l2: rgb(169 196 255 / 18%);
+}
+
+/* ── 字标 HARNESS：文本交给内核，这里只做视觉 ─────────────────────────── */
+
+/* 紧跟 [data-dsh-boot-spinner] 之前的那个 div 就是字标；失败报告分支没有 spinner。 */
+[data-dsh-boot][data-dsh-boot] > div > div:has(+ [data-dsh-boot-spinner]) {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.44em;
+  text-indent: 0.44em;
+  color: var(--dsw-alias-label-primary);
+  text-shadow: 0 1px 14px rgb(255 255 255 / 80%);
+}
+
+body[data-ds-dark-theme] [data-dsh-boot][data-dsh-boot] > div > div:has(+ [data-dsh-boot-spinner]) {
+  text-shadow: 0 0 18px rgb(120 160 255 / 55%);
+}
+
+/* ── 提示行 "Loading plugins…" ────────────────────────────────────────── */
+
+[data-dsh-boot][data-dsh-boot] > div > [data-dsh-boot-spinner] + div {
+  font-size: 11.5px;
+  letter-spacing: 0.16em;
+  color: var(--dsw-alias-label-tertiary);
+  text-shadow: 0 1px 8px rgb(255 255 255 / 55%);
+}
+
+body[data-ds-dark-theme] [data-dsh-boot][data-dsh-boot] > div > [data-dsh-boot-spinner] + div {
+  text-shadow: 0 1px 8px rgb(9 12 20 / 60%);
+}
+
+/* ── 三个朝日：把内核的进度环改造成三格调度容器 ─────────────────────────
+ *
+ * 三格分别是：
+ *   左  [data-dsh-boot-spinner]::before          —— 动 transform
+ *   中  [data-dsh-boot-spinner] 自身的 background —— 动 background-position（见文件头第 3 条）
+ *   右  [data-dsh-boot-spinner]::after           —— 动 transform
+ * 每格轮流跳一次，跳起来换 happy 图，落地换回 idle 图。
+ */
+
+[data-dsh-boot-spinner][data-dsh-boot-spinner] {
+  --luna-asahi-h: 78px;
+  --luna-asahi-w: 60.67px; /* 素材 560x720 = 7:9 */
+  --luna-asahi-gap: 12px;
+  --luna-asahi-travel: 28px;
+
+  position: relative;
+  width: calc(3 * var(--luna-asahi-w) + 2 * var(--luna-asahi-gap));
+  height: calc(var(--luna-asahi-h) + var(--luna-asahi-travel));
+
+  /* 抹掉内核的进度环外观：边框、圆角、旋转、外发光 */
+  border: 0;
+  border-radius: 0;
+  corner-shape: border-box;
+  /* 容器高度比图高正好等于 travel，所以 background-position 的 100% 是落地、0% 是最高点 */
+  background-repeat: no-repeat;
+  background-position: center 100%;
+  background-size: var(--luna-asahi-w) var(--luna-asahi-h);
+  background-image: url("./asahi-idle.webp");
+  animation: luna-asahi-hop-center 1200ms ease-in-out infinite;
+  animation-delay: 400ms; /* 中格 */
+}
+
+/* 右格：先清掉内核 ::after 的 conic-gradient 进度弧与遮罩 */
+[data-dsh-boot-spinner][data-dsh-boot-spinner]::after {
+  content: '';
+  position: absolute;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  width: var(--luna-asahi-w);
+  height: var(--luna-asahi-h);
+  border: 0;
+  border-radius: 0;
+  background: none;
+  background-repeat: no-repeat;
+  background-position: center bottom;
+  background-size: contain;
+  background-image: url("./asahi-idle.webp");
+  -webkit-mask: none;
+  mask: none;
+  animation: luna-asahi-hop 1200ms ease-in-out infinite;
+  animation-delay: 800ms; /* 右格 */
+}
+
+/* 左格 */
+[data-dsh-boot-spinner][data-dsh-boot-spinner]::before {
+  content: '';
+  position: absolute;
+  top: auto;
+  right: auto;
+  bottom: 0;
+  left: 0;
+  width: var(--luna-asahi-w);
+  height: var(--luna-asahi-h);
+  background-repeat: no-repeat;
+  background-position: center bottom;
+  background-size: contain;
+  background-image: url("./asahi-idle.webp");
+  animation: luna-asahi-hop 1200ms ease-in-out infinite;
+  animation-delay: 0ms; /* 左格 */
+}
+
+/*
+ * 深色模式下朝日本体是深蓝，压在暗底上会糊。filter 加在容器上会把三格当成一个整体
+ * 描边，正好一层辉光覆盖三个，不用分别加。
+ */
+body[data-ds-dark-theme] [data-dsh-boot-spinner][data-dsh-boot-spinner] {
+  filter: drop-shadow(0 0 7px rgb(150 185 255 / 32%));
+}
+
+/*
+ * 左右两格：位移走 transform。
+ * 60% 的时间在跳、40% 在等，三格错开 400ms，正好接成一圈。
+ * background-image 是离散动画，浏览器在两个关键帧之间取中点切换；所以起跳那一段
+ * 写成 0% → 1%，让换图几乎瞬间发生，而不是等升到一半才换。
+ */
+@keyframes luna-asahi-hop {
+  0% {
+    transform: translateY(0);
+    background-image: url("./asahi-idle.webp");
+  }
+  1% {
+    transform: translateY(-3px);
+    background-image: url("./asahi-happy.webp");
+  }
+  14% {
+    transform: translateY(calc(-1 * var(--luna-asahi-travel)));
+    background-image: url("./asahi-happy.webp");
+  }
+  28% {
+    transform: translateY(0);
+    background-image: url("./asahi-idle.webp");
+  }
+  100% {
+    transform: translateY(0);
+    background-image: url("./asahi-idle.webp");
+  }
+}
+
+/*
+ * 中格：位移走 background-position，全程不动 transform。
+ * 容器高 = 图高 + travel，所以 100% = 底对齐（落地）、0% = 顶对齐（抬高 travel）。
+ */
+@keyframes luna-asahi-hop-center {
+  0% {
+    background-position: center 100%;
+    background-image: url("./asahi-idle.webp");
+  }
+  1% {
+    background-position: center 93%;
+    background-image: url("./asahi-happy.webp");
+  }
+  14% {
+    background-position: center 0%;
+    background-image: url("./asahi-happy.webp");
+  }
+  28% {
+    background-position: center 100%;
+    background-image: url("./asahi-idle.webp");
+  }
+  100% {
+    background-position: center 100%;
+    background-image: url("./asahi-idle.webp");
+  }
+}
+
+/* ── 减少动态效果 ─────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  /* 不跳了，但三个朝日仍要说明"还在加载"：整体做一次慢呼吸。 */
+  [data-dsh-boot-spinner][data-dsh-boot-spinner],
+  [data-dsh-boot-spinner][data-dsh-boot-spinner]::before,
+  [data-dsh-boot-spinner][data-dsh-boot-spinner]::after {
+    animation: luna-asahi-breathe 2200ms ease-in-out infinite;
+    animation-delay: 0ms;
+  }
+}
+
+@keyframes luna-asahi-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}

@@ -1,0 +1,64 @@
+{
+  "name": "dsh-luna-theme",
+  "version": "0.14.9",
+  "private": true,
+  "description": "Luna theme for DSH, with a balance widget, memory badge, Asahi desktop pet and an optional title opening with voice playback.",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./widget": "./widget.js",
+    "./pet": "./pet.js",
+    "./opening": "./opening.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "widget.js",
+    "pet.js",
+    "opening.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
+    "assets/wallpaper.webp",
+    "assets/luna-settings.webp",
+    "assets/luna-noon.webp",
+    "assets/luna-bot.png",
+    "assets/asahi.webp",
+    "assets/pet-art",
+    "assets/opening",
+    "persona/asahi-chat.md",
+    "pet-live2d.js",
+    "pet-animation-assets.js",
+    "assets/pet-live2d"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wuu-uul/dsh-luna-theme.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wuu-uul/dsh-luna-theme/issues"
+  },
+  "homepage": "https://github.com/wuu-uul/dsh-luna-theme#readme",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "luna-theme",
+    "plugin",
+    "theme",
+    "wallpaper"
+  ],
+  "author": "wuu-uul",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+# Only the root row carries the package's client bundle. Component subpaths
+# can be disabled independently through the profile's cordis.patch.yml:
+#   - id: luna-opening
+#     disabled: true
+# Disabling the root theme also removes all component page scripts.
+- insert:
+    - id: dsh-luna-theme
+      name: dsh-luna-theme
+    - id: luna-balance-widget
+      name: dsh-luna-theme/widget
+    - id: luna-pet
+      name: dsh-luna-theme/pet
+    - id: luna-opening
+      name: dsh-luna-theme/opening

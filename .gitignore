@@ -1,0 +1,48 @@
+# 依赖与本地产物
+node_modules/
+*.tgz
+package-lock.json
+# 插件运行期上报；DSH_PROFILE_DIR 未注入时会落到包目录，也就是本仓库
+*.log
+
+# 编辑器 / 操作系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# 本地验证、工程与制作产物
+verify*.mjs
+preview/
+tests/
+scripts/
+work/
+output/
+dist/
+build/
+coverage/
+.playwright-mcp/
+__pycache__/
+*.pyc
+*.psd
+*.psb
+*.cmo3
+*.can3
+*.tmp
+*.bak
+
+# 私有配置、运行状态与凭据
+.env
+.env.*
+.dsh*
+.codex/
+AGENTS.md
+CLAUDE.md
+*.local
+*.key
+*.pem
+*.p12
+*.pfx
+*.sqlite*
+*.db
