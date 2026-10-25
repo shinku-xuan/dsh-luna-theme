@@ -1,40 +1,35 @@
 {
   "name": "dsh-luna-theme",
-  "version": "0.14.8",
+  "version": "0.15.0",
   "private": true,
   "description": "Luna theme for DSH, with a balance widget, memory badge, Asahi desktop pet and an optional title opening with voice playback.",
   "license": "MIT",
   "type": "module",
-  "main": "index.js",
+  "main": "src/host/index.js",
   "exports": {
-    ".": "./index.js",
-    "./client": "./client.js",
-    "./widget": "./widget.js",
-    "./pet": "./pet.js",
-    "./opening": "./opening.js",
-    "./package.json": "./package.json"
+    ".": "./src/host/index.js",
+    "./client": "./lib/client.js",
+    "./widget": "./src/host/widget.js",
+    "./pet": "./src/host/pet.js",
+    "./opening": "./src/host/opening.js",
+    "./package.json": "./package.json",
+    "./backgrounds": "./resources/backgrounds.json",
+    "./background-types": {
+      "types": "./src/shared/background-types.d.ts"
+    }
   },
   "files": [
-    "index.js",
-    "client.js",
-    "widget.js",
-    "pet.js",
-    "opening.js",
+    "src",
+    "lib/client.js",
+    "resources/backgrounds.json",
+    "scripts/build-client.mjs",
+    "assets",
+    "persona/asahi-chat.md",
     "cordis.patch.yml",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
-    "THIRD-PARTY-NOTICES.md",
-    "assets/wallpaper.webp",
-    "assets/luna-settings.webp",
-    "assets/luna-noon.webp",
-    "assets/luna-bot.png",
-    "assets/asahi.webp",
-    "assets/pet-art",
-    "assets/opening",
-    "persona/asahi-chat.md",
-    "pet-live2d.js",
-    "pet-animation-assets.js",
-    "assets/pet-live2d"
+    "THIRD-PARTY-NOTICES.md"
   ],
   "dsh": {
     "bundle": {
@@ -43,5 +38,16 @@
     "client": {
       "platform": "web"
     }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "scripts": {
+    "build": "node scripts/build-client.mjs",
+    "build:check": "node scripts/build-client.mjs --check",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3"
   }
 }

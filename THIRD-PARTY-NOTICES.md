@@ -13,9 +13,8 @@
 
 | 文件 | 用途 | 处理 |
 |---|---|---|
-| `assets/wallpaper.webp` | 界面壁纸 | 经模糊与重新编码 |
+| `assets/backgrounds/luna-1.png` 至 `luna-10.png`、对应 `.mp4` | 十组对话背景与编号轮换 | PNG 原样复制自用户提供的静态背景；视频由用户制作的木偶动画转为 H.264，保持 1920×1080、60fps 与原时长，移除音轨；客户端不分发 Cubism SDK |
 | `assets/luna-settings.webp` | 设置面板背景 | 中心方裁切后经模糊与重新编码 |
-| `assets/luna-noon.webp` | 余额挂件底图 | 原样，复制自 Luna-Chat 前端随附的 `api_balance_noon.webp` |
 | `assets/luna-bot.png` | 余额挂件的透明底极简机器人头像 | 以用户提供的露娜冬季校服图为角色参考，通过内置 imagegen 生成并去除背景；镜像显示与白色余额框由界面绘制 |
 | `assets/opening/*.png`、`*.webp` | 双主题开屏背景、角色、花瓣、Logo 与启动页皮肤 | 用户提供的游戏素材原样复制，通过 CSS 组合与裁切 |
 | `assets/opening/lun_sp06.wav` | 全黑阶段的开场语音 | 用户提供的游戏音频原样复制 |
@@ -29,8 +28,8 @@
 - 本项目**不销售**或单独授权上述素材；使用者不应将其用于商业用途，
   也不应据其主张任何权利。
 - 若权利人 Navel 认为本使用方式不妥，**请提出，本项目会立即移除相关素材**
-  （删除对应文件即可，不影响插件其余功能：删 `assets/wallpaper.webp` 回退为无壁纸，
-  删 `assets/luna-settings.webp` 后设置面板回退为原主题底色，
+  （移除对话背景时需同步移除 `resources/backgrounds.json` 中对应条目并保留一个有效默认背景，或停用主题主行；
+  `assets/luna-settings.webp` 是设置面板的独立图片，
   删 `assets/luna-bot.png` 后头像路由返回 404，白色余额框继续显示，
   删 `assets/asahi.webp`、`assets/pet-art/` 与 `assets/pet-live2d/` 后桌宠不显示；
   开屏素材缺失时显示重试，可点击画面跳过，或停用 `luna-opening` 组件）。
@@ -39,11 +38,11 @@
 
 插件的配色与材质语言参考了 [Luna-Chat](https://gitee.com/ciallo0d00/luna-chat) 前端的视觉设计
 （深靛蓝底、半透明紫玻璃面板、樱花粉第二强调色）。该参考仅涉及**设计语言**，
-不包含对方代码或素材的复制（第 1 节那张底图除外，其权利归属见上）。
+未复制对方代码或素材。
 
 ## 3. 余额挂件代码
 
-`widget.js` 的宿主半边与其中的页面脚本，派生自
+`src/host/widget.js` 与 `src/client/widget/script.js` 中的余额挂件代码，派生自
 [DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)
 （作者 MeteorNOX）的发布包，该项目的**代码**以 MIT License 授权：
 
@@ -53,12 +52,11 @@ MIT License
 Copyright (c) 2026 MeteorNOX
 ```
 
-本项目对 `widget.js` 的改动：使用独立机器人头像与白色余额框，新增收起与展开、余额与本日账单切换、计费时段提示、双语文案和主题次档按钮，图片按扩展名给出 MIME，绘图尺寸持久化的路径跟随包目录，样式表带 `data-plugin` 归属标记，插件名为 `luna-balance-widget` 以便单独开关，页面脚本提供停用清理。
+本项目对余额挂件的改动：使用独立机器人头像与白色余额框，新增收起与展开、余额与本日账单切换、计费时段提示、双语文案和主题次档按钮，图片按扩展名给出 MIME，绘图尺寸保存在 profile 并兼容旧尺寸文件，样式表带 `data-plugin` 归属标记，插件名为 `luna-balance-widget` 以便单独开关，页面脚本提供停用清理。
 
-> 上游仓库的 `assets/`（鲸鱼图、动图、音效）**不在 MIT 覆盖范围内**，也未随本项目分发；
-> `DSniang02.png` 只作为本机已存在文件的回退路径被引用，不随包提供。
+> 上游仓库的 `assets/`（鲸鱼图、动图、音效）**不在 MIT 覆盖范围内**，也未随本项目分发。
 
 ## 4. 本项目代码
 
-除上述素材与第 3 节声明的派生代码外的全部文件（`client.js`、`index.js` 等）
+除上述素材与第 3 节声明的派生代码外的全部文件（`src/`、`scripts/` 与 `lib/client.js` 等）
 均以 **MIT License** 授权，详见仓库根目录的 `LICENSE`。

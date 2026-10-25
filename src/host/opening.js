@@ -1,6 +1,6 @@
 /** Host component for the theme's boot skin, title artwork and opening voice. */
 import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** Independently switchable component id in the theme bundle. */
@@ -9,8 +9,9 @@ export const name = 'luna-opening'
 /** Static assets and the first-paint skin require the web server. */
 export const inject = ['webServer']
 
-const PACKAGE_DIR = dirname(fileURLToPath(import.meta.url))
+const PACKAGE_DIR = fileURLToPath(new URL('../../', import.meta.url))
 const ASSET_DIR = join(PACKAGE_DIR, 'assets', 'opening')
+const CODE_DIR = fileURLToPath(new URL('../client/opening/', import.meta.url))
 const ROUTE_BASE = '/dsh-luna-opening'
 const ASSET_TYPES = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -48,7 +49,7 @@ function serveAsset(req, res) {
   try {
     const bytes = readFileSync(asset === 'preview.html'
       ? join(PACKAGE_DIR, 'preview', 'opening.html')
-      : join(ASSET_DIR, asset))
+      : join(/\.(?:css|js)$/.test(asset) ? CODE_DIR : ASSET_DIR, asset))
     res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' })
     res.end(bytes)
   } catch (error) {
@@ -64,7 +65,7 @@ function serveAsset(req, res) {
  */
 export function apply(ctx) {
   // Desktop captures the injection table at Host-ready, before asynchronous work.
-  const skin = readFileSync(join(ASSET_DIR, 'boot-skin.css'), 'utf8')
+  const skin = readFileSync(join(CODE_DIR, 'boot-skin.css'), 'utf8')
   ctx.on('webserver/index-inject', table => {
     if (!Array.isArray(table)) return
     table.push({

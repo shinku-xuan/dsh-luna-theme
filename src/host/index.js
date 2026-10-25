@@ -1,32 +1,16 @@
-/**
- * Host half of the Luna restyle.
- *
- * The Client half carries both artworks inline, so this half has no bytes to
- * serve. It exists for two reasons.
- *
- * First, it records what the Client half reports about itself: a plugin that
- * never activated is otherwise indistinguishable from one that activated and
- * changed nothing, because the shell's browser console is not reachable from
- * outside. Each report is appended to `luna-theme-ping.log` in the profile
- * directory.
- *
- * Second, it answers the memory badge the Client half injects. Only this half
- * can read the machine's memory, so the badge is fed from here rather than from
- * the page.
- */
+/** Luna theme Host: background media, live settings, and memory diagnostics. */
+import { installBackgroundHost } from './background.js'
+export { Config } from './background.js'
 import { execFile } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { freemem, totalmem } from 'node:os'
-import { basename, dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const PACKAGE_DIR = dirname(fileURLToPath(import.meta.url))
+import { basename, join } from 'node:path'
 
 /** Plugin name, matching the Client bundle id and the patch row. */
 export const name = 'dsh-luna-theme'
 
-/** The report and memory routes are the only capabilities this half needs. */
-export const inject = ['webServer']
+/** Media and diagnostic routes require the web server; settings bind when available. */
+export const inject = ['webServer', 'profileContext']
 
 /** Route the Client half beacons to. */
 const PING_ROUTE = '/dsh-luna/ping'
@@ -36,9 +20,6 @@ const MEMORY_ROUTE = '/dsh-luna/memory.json'
 
 /** Route the badge fetches when its detail panel opens. */
 const MEMORY_DETAIL_ROUTE = '/dsh-luna/memory-detail.json'
-
-/** Report file; the profile directory is writable and outlives package replacement. */
-const LOG_PATH = join(process.env.DSH_PROFILE_DIR ?? PACKAGE_DIR, 'luna-theme-ping.log')
 
 /** Kibibytes per mebibyte, and bytes per kibibyte. */
 const KIB = 1024
@@ -165,6 +146,8 @@ async function answerMemory(detailed, res) {
  * @param ctx - the plugin fiber's Host context.
  */
 export function apply(ctx) {
+  const logPath = join(ctx.profileContext.dir, 'luna-theme-ping.log')
+  installBackgroundHost(ctx)
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: PING_ROUTE,
@@ -172,7 +155,7 @@ export function apply(ctx) {
       const query = new URL(req.url ?? '/', 'http://localhost').searchParams
       const line = `${new Date().toISOString()} ${[...query].map(([k, v]) => `${k}=${v}`).join(' ')}\n`
       try {
-        appendFileSync(LOG_PATH, line)
+        appendFileSync(logPath, line)
       } catch {
         // A failed report must not fail the request; the Client ignores the body either way.
       }

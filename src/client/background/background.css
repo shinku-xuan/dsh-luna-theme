@@ -1,0 +1,52 @@
+html body[data-luna-background-managed] { background-image: none; }
+[data-luna-background] .luna-bg-picture { position: absolute; inset: 0; }
+[data-luna-background] .luna-bg-scene { position: absolute; inset: 0; will-change: opacity; }
+[data-luna-background] .luna-bg-media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center; }
+[data-luna-background] .luna-bg-fill { position: absolute; inset: -24px; background-position: center; background-size: cover; filter: blur(24px); }
+[data-luna-background] .luna-bg-scrim { position: absolute; inset: 0; background: rgb(250, 248, 255); }
+body[data-ds-dark-theme] [data-luna-background] .luna-bg-scrim { background: rgb(15, 12, 32); }
+.luna-bg-settings { display: flex; flex-direction: column; min-width: 0; width: 100%; gap: 18px; color: var(--dsw-alias-label-primary); }
+.luna-bg-settings h2 { font-size: 18px; font-weight: 500; margin: 0; }
+.luna-bg-settings p { margin: 0; }
+.luna-bg-description, .luna-bg-hint { color: var(--dsw-alias-label-secondary); line-height: 1.55; font-size: 12px; overflow-wrap: anywhere; }
+.luna-bg-description { font-size: 13px; }
+.luna-bg-toggle { display: flex; gap: 16px; justify-content: space-between; align-items: center; }
+.luna-bg-toggle > div { min-width: 0; }
+.luna-bg-toggle > button { flex-shrink: 0; }
+.luna-bg-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 500; line-height: 1.6; }
+.luna-bg-label output { font-variant-numeric: tabular-nums; font-weight: 400; color: var(--dsw-alias-label-secondary); }
+.luna-bg-row input[type='range'] { display: block; width: 100%; height: 28px; margin: 3px 0; accent-color: var(--dsw-alias-brand-primary); cursor: pointer; }
+.luna-bg-row input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }
+.luna-bg-row input:disabled { cursor: default; opacity: 0.5; }
+.luna-bg-footer, .luna-bg-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.luna-bg-footer { padding-top: 4px; }
+.luna-bg-notice { font-size: 12px; line-height: 1.5; }
+.luna-bg-number-row input { box-sizing: border-box; min-height: 36px; margin: 6px 0; border: 1px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; padding: 6px 10px; }
+.luna-bg-mode-control { display: block; width: 100%; margin-top: 6px; }
+body .luna-bg-mode-trigger { display: flex; width: 100%; min-height: 36px; justify-content: space-between; padding-inline: 10px; }
+body .luna-bg-mode-menu { z-index: 10020; min-width: 180px; background: var(--luna-sub-plate-strong); color: var(--luna-sub-ink); border: 1px solid var(--luna-sub-edge); }
+.luna-bg-thumbnails { display: flex; box-sizing: border-box; width: 100%; min-width: 0; gap: 8px; overflow-x: auto; padding: 4px; }
+.luna-bg-thumbnail { position: relative; display: block; flex: 0 0 88px; height: 50px; overflow: hidden; border: 2px solid transparent; border-radius: var(--dsw-radius-sm); cursor: pointer; box-sizing: border-box; }
+.luna-bg-thumbnail img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.luna-bg-thumbnail input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; }
+.luna-bg-thumbnail:has(input:checked) { border-color: var(--dsw-alias-brand-primary); box-shadow: 0 0 0 1px var(--dsw-alias-brand-primary); }
+.luna-bg-thumbnail:has(input:focus-visible) { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+.luna-bg-thumbnail:has(input:disabled) { opacity: .5; cursor: default; }
+@media (hover: hover) { .luna-bg-thumbnail:hover { border-color: var(--dsw-alias-brand-primary); } }
+.luna-bg-number-row { display: flex; align-items: center; gap: 8px; }
+.luna-bg-number-row input { width: 112px; max-width: 100%; }
+.luna-bg-number-row input[aria-invalid='true'] { border-color: var(--dsw-alias-label-primary); }
+.luna-bg-number-row input:disabled { opacity: .5; }
+.luna-bg-number-row input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+body > div:has(> [data-shortcut-modal='settings'] [data-luna-background-settings]) { z-index: 10000; }
+@media (max-width: 640px) {
+  body [data-shortcut-modal='settings']:has([data-luna-background-settings]) { flex-direction: column; }
+  [data-shortcut-modal='settings']:has([data-luna-background-settings]) > nav { width: 100%; padding: 16px 12px 0; gap: 12px; }
+  [data-shortcut-modal='settings']:has([data-luna-background-settings]) > nav > div:last-child { flex-direction: row; flex-wrap: wrap; overflow-x: hidden; }
+  [data-shortcut-modal='settings']:has([data-luna-background-settings]) > nav button { flex: none; padding-inline: 8px; gap: 6px; font-size: 13px; }
+  [data-shortcut-modal='settings']:has([data-luna-background-settings]) > nav + div { min-height: 0; }
+  [data-shortcut-modal='settings']:has([data-luna-background-settings]) > nav + div > div:first-child { height: 48px; padding-top: 10px; }
+  [data-shortcut-modal='settings']:has([data-luna-background-settings]) > nav + div > div:last-child { padding-inline: 20px; }
+  .luna-bg-toggle { align-items: flex-start; }
+  .luna-bg-toggle > button { margin-top: 4px; }
+}

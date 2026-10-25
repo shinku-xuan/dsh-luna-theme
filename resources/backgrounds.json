@@ -1,0 +1,160 @@
+{
+  "defaultId": "luna-1",
+  "aliases": {
+    "luna-v08": "luna-1"
+  },
+  "defaults": {
+    "animated": true,
+    "mask": 56,
+    "blur": 2,
+    "transparency": 0,
+    "backgroundMode": "rotate",
+    "rotationSeconds": 30,
+    "transitionMilliseconds": 1000
+  },
+  "controls": {
+    "mask": {
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "unit": "%"
+    },
+    "blur": {
+      "min": 0,
+      "max": 24,
+      "step": 1,
+      "unit": "px"
+    },
+    "transparency": {
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "unit": "%"
+    }
+  },
+  "rotation": {
+    "minimumSeconds": 12
+  },
+  "backgrounds": [
+    {
+      "id": "luna-1",
+      "order": 1,
+      "name": {
+        "zh": "背景 1",
+        "en": "Background 1"
+      },
+      "poster": "assets/backgrounds/luna-1.png",
+      "video": "assets/backgrounds/luna-1.mp4",
+      "duration": 11.82,
+      "revision": "02e55a03110d"
+    },
+    {
+      "id": "luna-2",
+      "order": 2,
+      "name": {
+        "zh": "背景 2",
+        "en": "Background 2"
+      },
+      "poster": "assets/backgrounds/luna-2.png",
+      "video": "assets/backgrounds/luna-2.mp4",
+      "duration": 11.82,
+      "revision": "633d27b2d6b0"
+    },
+    {
+      "id": "luna-3",
+      "order": 3,
+      "name": {
+        "zh": "背景 3",
+        "en": "Background 3"
+      },
+      "poster": "assets/backgrounds/luna-3.png",
+      "video": "assets/backgrounds/luna-3.mp4",
+      "duration": 11.82,
+      "revision": "8e1723bd7c9e"
+    },
+    {
+      "id": "luna-4",
+      "order": 4,
+      "name": {
+        "zh": "背景 4",
+        "en": "Background 4"
+      },
+      "poster": "assets/backgrounds/luna-4.png",
+      "video": "assets/backgrounds/luna-4.mp4",
+      "duration": 11.82,
+      "revision": "28c7362de041"
+    },
+    {
+      "id": "luna-5",
+      "order": 5,
+      "name": {
+        "zh": "背景 5",
+        "en": "Background 5"
+      },
+      "poster": "assets/backgrounds/luna-5.png",
+      "video": "assets/backgrounds/luna-5.mp4",
+      "duration": 11.82,
+      "revision": "0c7aa19765de"
+    },
+    {
+      "id": "luna-6",
+      "order": 6,
+      "name": {
+        "zh": "背景 6",
+        "en": "Background 6"
+      },
+      "poster": "assets/backgrounds/luna-6.png",
+      "video": "assets/backgrounds/luna-6.mp4",
+      "duration": 11.82,
+      "revision": "ebe3d6ed916e"
+    },
+    {
+      "id": "luna-7",
+      "order": 7,
+      "name": {
+        "zh": "背景 7",
+        "en": "Background 7"
+      },
+      "poster": "assets/backgrounds/luna-7.png",
+      "video": "assets/backgrounds/luna-7.mp4",
+      "duration": 11.82,
+      "revision": "b36f33645500"
+    },
+    {
+      "id": "luna-8",
+      "order": 8,
+      "name": {
+        "zh": "背景 8",
+        "en": "Background 8"
+      },
+      "poster": "assets/backgrounds/luna-8.png",
+      "video": "assets/backgrounds/luna-8.mp4",
+      "duration": 11.82,
+      "revision": "c326937fee73"
+    },
+    {
+      "id": "luna-9",
+      "order": 9,
+      "name": {
+        "zh": "背景 9",
+        "en": "Background 9"
+      },
+      "poster": "assets/backgrounds/luna-9.png",
+      "video": "assets/backgrounds/luna-9.mp4",
+      "duration": 11.82,
+      "revision": "70e69e26f4eb"
+    },
+    {
+      "id": "luna-10",
+      "order": 10,
+      "name": {
+        "zh": "背景 10",
+        "en": "Background 10"
+      },
+      "poster": "assets/backgrounds/luna-10.png",
+      "video": "assets/backgrounds/luna-10.mp4",
+      "duration": 11.82,
+      "revision": "6831ff162fd9"
+    }
+  ]
+}

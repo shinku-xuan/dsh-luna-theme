@@ -2,7 +2,7 @@
 node_modules/
 *.tgz
 package-lock.json
-# 插件运行期上报；DSH_PROFILE_DIR 未注入时会落到包目录，也就是本仓库
+# 本地运行日志
 *.log
 
 # 编辑器 / 操作系统
@@ -15,8 +15,6 @@ Thumbs.db
 # 本地验证、工程与制作产物
 verify*.mjs
 preview/
-tests/
-scripts/
 work/
 output/
 dist/
@@ -46,3 +44,32 @@ CLAUDE.md
 *.pfx
 *.sqlite*
 *.db
+
+# 动画与绘画工程、制作归档
+*.aep
+*.aepx
+*.prproj
+*.blend
+*.blend1
+*.c4d
+*.kra
+*.ora
+*.sai
+*.sai2
+*.clip
+*.zip
+*.7z
+*.rar
+
+# 本地凭据与签名文件
+.npmrc
+.ssh/
+id_rsa*
+id_ed25519*
+*.keystore
+*.jks
+
+# 开发目录中的制作资料与历史验证
+pet-art-src/
+tools/
+HANDOFF.md
